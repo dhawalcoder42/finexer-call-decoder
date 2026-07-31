@@ -2,7 +2,8 @@
 
 Internal team tool: turns Otter.ai client call transcripts (.txt) into writer-ready
 insights using the free Gemini API. Email login, roles (admin / writer / viewer),
-and a shared library stored in Netlify Blobs, so the whole team sees the same calls.
+and a shared library stored in Supabase (Postgres), so the whole team sees the
+same calls.
 
 ## Roles
 
@@ -17,11 +18,17 @@ from the environment, then the password is stored as a secure hash.
 
 1. Node.js 18+ (check with `node -v`)
 2. Free Gemini key: https://aistudio.google.com/apikey
-3. Copy `.env.example` to `.env` and fill all four values
+3. Free Supabase project: https://supabase.com -> New project
+   - Open the SQL Editor in the Supabase dashboard, paste the contents of
+     `supabase-setup.sql` from this folder, and run it once. This creates
+     the `users` and `calls` tables.
+   - Project Settings -> API: copy the Project URL and the `service_role`
+     secret key (not the anon key).
+4. Copy `.env.example` to `.env` and fill all six values
    (generate SESSION_SECRET with:
    `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
-4. `npm install`
-5. Optional: drop your logo at `public/logo.png`
+5. `npm install`
+6. Optional: drop your logo at `public/logo.png`
 
 ## Run locally
 
@@ -36,11 +43,13 @@ Open http://localhost:8888 and sign in with ADMIN_EMAIL + ADMIN_PASSWORD.
 3. Build settings are read from netlify.toml automatically
 4. Before deploying, add these environment variables in Netlify
    (Site configuration -> Environment variables):
-   GEMINI_API_KEY, SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD
+   GEMINI_API_KEY, SESSION_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD,
+   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 5. Deploy. Open the live URL, sign in as admin, then add your team in the Team panel.
 
 ## Notes
 
-- Database: Netlify Blobs (built into Netlify, free tier, no external database account).
+- Database: Supabase (free tier Postgres). Two tables, `users` and `calls`,
+  created by `supabase-setup.sql`.
 - Free Gemini tier is rate limited; the queue waits ~6.5s between calls and retries on 429s.
 - Model can be changed with a GEMINI_MODEL env var (default gemini-flash-latest).

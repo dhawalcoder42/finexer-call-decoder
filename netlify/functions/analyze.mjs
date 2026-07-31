@@ -1,15 +1,8 @@
 /* /.netlify/functions/analyze
    POST { id } -> loads the stored transcript, runs Gemini, saves insights
-   into the shared library. Requires admin or writer role. */
+   into the shared library (Supabase). Requires admin or writer role. */
 
-import {
-  json,
-  parseBody,
-  requireAuth,
-  store,
-  upsertIndexEntry,
-  normalizeInsights,
-} from "../lib/util.mjs";
+import { json, parseBody, requireAuth, sb, normalizeInsights } from "../lib/util.mjs";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 const PROMPT_TRANSCRIPT_CHARS = 48000; // keep responses fast inside the function time limit
@@ -77,34 +70,42 @@ export const handler = async (event) => {
   }
 
   const { id } = parseBody(event);
-  const s = store();
-  const call = await s.get("call:" + id, { type: "json" });
-  if (!call) return json(404, { error: "Call not found." });
-  if (!call.transcript) {
+  const client = sb();
+  const { data: row, error: fetchErr } = await client
+    .from("calls")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchErr) return json(500, { error: "Database error: " + fetchErr.message });
+  if (!row) return json(404, { error: "Call not found." });
+  if (!row.transcript) {
     return json(400, { error: "No transcript stored for this call. Re-upload it." });
   }
 
   // Guard: if another person is already analyzing this call, skip.
   if (
-    call.status === "processing" &&
-    call.processingAt &&
-    Date.now() - call.processingAt < 90000
+    row.status === "processing" &&
+    row.processing_at &&
+    Date.now() - row.processing_at < 90000
   ) {
     return json(409, { error: "This call is already being analyzed." });
   }
 
-  call.status = "processing";
-  call.processingAt = Date.now();
-  call.errorMsg = null;
-  await s.setJSON("call:" + id, call);
-  await upsertIndexEntry(call);
+  const now = Date.now();
+  await client
+    .from("calls")
+    .update({ status: "processing", processing_at: now, error_msg: null })
+    .eq("id", id);
 
   const fail = async (statusCode, message, { keepQueued = false } = {}) => {
-    call.status = keepQueued ? "queued" : "error";
-    call.errorMsg = keepQueued ? null : message;
-    call.processingAt = null;
-    await s.setJSON("call:" + id, call);
-    await upsertIndexEntry(call);
+    await client
+      .from("calls")
+      .update({
+        status: keepQueued ? "queued" : "error",
+        error_msg: keepQueued ? null : message,
+        processing_at: null,
+      })
+      .eq("id", id);
     return json(statusCode, { error: message });
   };
 
@@ -119,7 +120,7 @@ export const handler = async (event) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: buildPrompt(call.transcript) }] }],
+          contents: [{ parts: [{ text: buildPrompt(row.transcript) }] }],
           generationConfig: {
             responseMimeType: "application/json",
             temperature: 0.2,
@@ -158,14 +159,33 @@ export const handler = async (event) => {
     if (start === -1 || end <= start) throw new Error("no json");
     const insights = normalizeInsights(JSON.parse(text.slice(start, end + 1)));
 
-    call.status = "done";
-    call.insights = insights;
-    call.processedAt = Date.now();
-    call.processingAt = null;
-    call.errorMsg = null;
-    await s.setJSON("call:" + id, call);
-    await upsertIndexEntry(call);
-    return json(200, { call });
+    const processedAt = Date.now();
+    const { error: updErr } = await client
+      .from("calls")
+      .update({
+        status: "done",
+        insights,
+        processed_at: processedAt,
+        processing_at: null,
+        error_msg: null,
+      })
+      .eq("id", id);
+    if (updErr) return json(500, { error: "Database error: " + updErr.message });
+
+    return json(200, {
+      call: {
+        id: row.id,
+        filename: row.filename,
+        transcript: row.transcript,
+        status: "done",
+        insights,
+        errorMsg: null,
+        uploadedBy: row.uploaded_by,
+        uploadedAt: row.uploaded_at,
+        processedAt,
+        processingAt: null,
+      },
+    });
   } catch (e) {
     const reason = candidate.finishReason ? " (" + candidate.finishReason + ")" : "";
     return fail(502, "Could not parse the model output" + reason + ". Retry this call.");

@@ -5,7 +5,7 @@ import {
   json,
   parseBody,
   getUsers,
-  saveUsers,
+  saveUser,
   hashPassword,
   verifyPassword,
   signToken,
@@ -33,7 +33,12 @@ export const handler = async (event) => {
       return json(400, { error: "Enter both email and password." });
     }
 
-    const users = await getUsers();
+    let users;
+    try {
+      users = await getUsers();
+    } catch (e) {
+      return json(500, { error: e.message });
+    }
     const user = users[email];
     if (!user) {
       return json(401, {
@@ -53,8 +58,7 @@ export const handler = async (event) => {
       const { passSalt, passHash } = hashPassword(password);
       user.passSalt = passSalt;
       user.passHash = passHash;
-      users[user.email] = user;
-      await saveUsers(users);
+      await saveUser(user);
       ok = true;
     } else if (!user.passHash) {
       return json(401, {
@@ -88,7 +92,12 @@ export const handler = async (event) => {
     if (next.length < 8) {
       return json(400, { error: "New password must be at least 8 characters." });
     }
-    const users = await getUsers();
+    let users;
+    try {
+      users = await getUsers();
+    } catch (e) {
+      return json(500, { error: e.message });
+    }
     const record = users[user.email];
     let ok = false;
     if (record.passHash) {
@@ -105,8 +114,7 @@ export const handler = async (event) => {
     const { passSalt, passHash } = hashPassword(next);
     record.passSalt = passSalt;
     record.passHash = passHash;
-    users[user.email] = record;
-    await saveUsers(users);
+    await saveUser(record);
     return json(200, { ok: true });
   }
 

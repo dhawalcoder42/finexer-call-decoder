@@ -7,12 +7,9 @@ import {
   json,
   parseBody,
   requireAuth,
-  store,
-  getIndex,
-  saveIndex,
+  sb,
+  rowToCall,
   lightEntry,
-  upsertIndexEntry,
-  removeIndexEntry,
 } from "../lib/util.mjs";
 import { randomUUID } from "node:crypto";
 
@@ -22,45 +19,45 @@ export const handler = async (event) => {
   const { user, error } = await requireAuth(event);
   if (error) return error;
   const canEdit = user.role === "admin" || user.role === "writer";
-  const s = store();
+  const client = sb();
 
   /* ---------- GET ---------- */
   if (event.httpMethod === "GET") {
     const id = (event.queryStringParameters || {}).id;
 
     if (id) {
-      const call = await s.get("call:" + id, { type: "json" });
-      if (!call) return json(404, { error: "Call not found." });
-      return json(200, { call });
+      const { data, error: dbErr } = await client
+        .from("calls")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (dbErr) return json(500, { error: "Database error: " + dbErr.message });
+      if (!data) return json(404, { error: "Call not found." });
+      return json(200, { call: rowToCall(data) });
     }
 
-    let index = await getIndex();
+    // Exclude transcript from the list query, it's the heavy column.
+    const { data, error: dbErr } = await client
+      .from("calls")
+      .select(
+        "id, filename, status, insights, error_msg, uploaded_by, uploaded_at, processed_at"
+      )
+      .order("uploaded_at", { ascending: true });
+    if (dbErr) return json(500, { error: "Database error: " + dbErr.message });
 
-    // Self-heal: pick up any call blobs missing from the index.
-    try {
-      const listed = await s.list({ prefix: "call:" });
-      const known = new Set(index.map((e) => e.id));
-      let changed = false;
-      for (const b of listed.blobs || []) {
-        const blobId = b.key.slice("call:".length);
-        if (!known.has(blobId)) {
-          const call = await s.get(b.key, { type: "json" });
-          if (call) {
-            index.push(lightEntry(call));
-            changed = true;
-          }
-        }
-      }
-      if (changed) {
-        index.sort((a, b) => (a.uploadedAt || 0) - (b.uploadedAt || 0));
-        await saveIndex(index);
-      }
-    } catch (e) {
-      /* listing unavailable, index alone is fine */
-    }
-
-    index.sort((a, b) => (a.uploadedAt || 0) - (b.uploadedAt || 0));
-    return json(200, { calls: index });
+    const calls = (data || []).map((row) =>
+      lightEntry({
+        id: row.id,
+        filename: row.filename,
+        status: row.status,
+        insights: row.insights,
+        errorMsg: row.error_msg,
+        uploadedBy: row.uploaded_by,
+        uploadedAt: row.uploaded_at,
+        processedAt: row.processed_at,
+      })
+    );
+    return json(200, { calls });
   }
 
   /* ---------- POST ---------- */
@@ -87,40 +84,57 @@ export const handler = async (event) => {
       processedAt: null,
       processingAt: null,
     };
-    await s.setJSON("call:" + call.id, call);
-    await upsertIndexEntry(call);
+    const { error: dbErr } = await client.from("calls").insert({
+      id: call.id,
+      filename: call.filename,
+      transcript: call.transcript,
+      status: call.status,
+      uploaded_by: call.uploadedBy,
+      uploaded_at: call.uploadedAt,
+    });
+    if (dbErr) return json(500, { error: "Database error: " + dbErr.message });
     return json(200, { call: lightEntry(call) });
   }
 
   if (action === "delete") {
     const id = String(body.id || "");
-    const call = await s.get("call:" + id, { type: "json" });
-    if (!call) return json(404, { error: "Call not found." });
+    const { data: row, error: fetchErr } = await client
+      .from("calls")
+      .select("uploaded_by")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchErr) return json(500, { error: "Database error: " + fetchErr.message });
+    if (!row) return json(404, { error: "Call not found." });
     const allowed =
       user.role === "admin" ||
-      (user.role === "writer" && call.uploadedBy === user.email);
+      (user.role === "writer" && row.uploaded_by === user.email);
     if (!allowed) {
       return json(403, { error: "You can only delete calls you uploaded." });
     }
-    await s.delete("call:" + id);
-    await removeIndexEntry(id);
+    const { error: delErr } = await client.from("calls").delete().eq("id", id);
+    if (delErr) return json(500, { error: "Database error: " + delErr.message });
     return json(200, { ok: true });
   }
 
   if (action === "requeue") {
     if (!canEdit) return json(403, { error: "Viewers cannot requeue calls." });
     const id = String(body.id || "");
-    const call = await s.get("call:" + id, { type: "json" });
-    if (!call) return json(404, { error: "Call not found." });
-    if (!call.transcript) {
+    const { data: row, error: fetchErr } = await client
+      .from("calls")
+      .select("transcript")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchErr) return json(500, { error: "Database error: " + fetchErr.message });
+    if (!row) return json(404, { error: "Call not found." });
+    if (!row.transcript) {
       return json(400, { error: "No transcript stored for this call. Re-upload it." });
     }
-    call.status = "queued";
-    call.errorMsg = null;
-    call.processingAt = null;
-    await s.setJSON("call:" + id, call);
-    await upsertIndexEntry(call);
-    return json(200, { call: lightEntry(call) });
+    const { error: updErr } = await client
+      .from("calls")
+      .update({ status: "queued", error_msg: null, processing_at: null })
+      .eq("id", id);
+    if (updErr) return json(500, { error: "Database error: " + updErr.message });
+    return json(200, { call: { id, status: "queued" } });
   }
 
   return json(400, { error: "Unknown action." });

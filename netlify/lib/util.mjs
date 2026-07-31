@@ -1,8 +1,8 @@
 /* Shared helpers for all Netlify Functions.
-   Storage: Netlify Blobs (built into Netlify, no external database needed).
+   Storage: Supabase (Postgres), accessed with the service role key.
    Auth: email + password, scrypt hashes, HMAC-signed session tokens. */
 
-import { getStore } from "@netlify/blobs";
+import { createClient } from "@supabase/supabase-js";
 import {
   scryptSync,
   randomBytes,
@@ -10,20 +10,20 @@ import {
   createHmac,
 } from "node:crypto";
 
-export const STORE_NAME = "call-decoder";
+let _client = null;
 
-// On the real Netlify servers (deployed site), Blobs context is injected
-// automatically and this fallback is never used. Locally, some CLI/OS
-// combinations fail to auto-inject that context into functions, so we
-// fall back to explicit siteID + token from env vars if they're set.
-export const store = () => {
-  const siteID = process.env.NETLIFY_SITE_ID;
-  const token = process.env.NETLIFY_AUTH_TOKEN;
-  if (siteID && token) {
-    return getStore({ name: STORE_NAME, siteID, token, consistency: "strong" });
+export function sb() {
+  if (_client) return _client;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error(
+      "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY is not set. Add both to .env locally and to Netlify environment variables."
+    );
   }
-  return getStore({ name: STORE_NAME, consistency: "strong" });
-};
+  _client = createClient(url, key, { auth: { persistSession: false } });
+  return _client;
+}
 
 export const json = (statusCode, body) => ({
   statusCode,
@@ -85,30 +85,68 @@ export function verifyToken(token, secret) {
   }
 }
 
-/* ---------------- users ---------------- */
+/* ---------------- users (Supabase table: users) ---------------- */
 
 export const ROLES = ["admin", "writer", "viewer"];
 
+function rowToUser(row) {
+  return {
+    email: row.email,
+    name: row.name || "",
+    role: row.role,
+    passSalt: row.pass_salt || null,
+    passHash: row.pass_hash || null,
+    createdAt: row.created_at || null,
+    addedBy: row.added_by || null,
+  };
+}
+
 export async function getUsers() {
-  const s = store();
-  let users = (await s.get("users", { type: "json" })) || {};
+  const client = sb();
+  const { data, error } = await client.from("users").select("*");
+  if (error) throw new Error("Database error: " + error.message);
+
+  const map = {};
+  for (const row of data || []) map[row.email] = rowToUser(row);
 
   // Bootstrap: make sure the ADMIN_EMAIL account always exists as admin.
   const adminEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
-  if (adminEmail && !users[adminEmail]) {
-    users[adminEmail] = {
+  if (adminEmail && !map[adminEmail]) {
+    const rec = {
       email: adminEmail,
       name: "Admin",
       role: "admin",
       createdAt: Date.now(),
     };
-    await s.setJSON("users", users);
+    const { error: insErr } = await client.from("users").insert({
+      email: rec.email,
+      name: rec.name,
+      role: rec.role,
+      created_at: rec.createdAt,
+    });
+    if (!insErr) map[adminEmail] = rec;
   }
-  return users;
+  return map;
 }
 
-export async function saveUsers(users) {
-  await store().setJSON("users", users);
+export async function saveUser(user) {
+  const client = sb();
+  const { error } = await client.from("users").upsert({
+    email: user.email,
+    name: user.name || "",
+    role: user.role,
+    pass_salt: user.passSalt || null,
+    pass_hash: user.passHash || null,
+    created_at: user.createdAt || Date.now(),
+    added_by: user.addedBy || null,
+  });
+  if (error) throw new Error("Database error: " + error.message);
+}
+
+export async function deleteUser(email) {
+  const client = sb();
+  const { error } = await client.from("users").delete().eq("email", email);
+  if (error) throw new Error("Database error: " + error.message);
 }
 
 export function publicUser(u) {
@@ -140,7 +178,12 @@ export async function requireAuth(event, roles) {
   if (!payload) {
     return { error: json(401, { error: "Not signed in or session expired." }) };
   }
-  const users = await getUsers();
+  let users;
+  try {
+    users = await getUsers();
+  } catch (e) {
+    return { error: json(500, { error: e.message }) };
+  }
   const record = users[payload.email];
   if (!record) {
     return {
@@ -157,7 +200,37 @@ export async function requireAuth(event, roles) {
   };
 }
 
-/* ---------------- calls index ---------------- */
+/* ---------------- calls (Supabase table: calls) ---------------- */
+
+export function rowToCall(row) {
+  return {
+    id: row.id,
+    filename: row.filename,
+    transcript: row.transcript || "",
+    status: row.status,
+    insights: row.insights || null,
+    errorMsg: row.error_msg || null,
+    uploadedBy: row.uploaded_by || "",
+    uploadedAt: row.uploaded_at || null,
+    processedAt: row.processed_at || null,
+    processingAt: row.processing_at || null,
+  };
+}
+
+export function callToRow(call) {
+  return {
+    id: call.id,
+    filename: call.filename,
+    transcript: call.transcript || "",
+    status: call.status,
+    insights: call.insights || null,
+    error_msg: call.errorMsg || null,
+    uploaded_by: call.uploadedBy || "",
+    uploaded_at: call.uploadedAt || null,
+    processed_at: call.processedAt || null,
+    processing_at: call.processingAt || null,
+  };
+}
 
 export function lightEntry(call) {
   const i = call.insights || {};
@@ -173,28 +246,6 @@ export function lightEntry(call) {
     company_or_project: i.company_or_project || null,
     one_liner: i.one_liner || null,
   };
-}
-
-export async function getIndex() {
-  return (await store().get("index", { type: "json" })) || [];
-}
-
-export async function saveIndex(index) {
-  await store().setJSON("index", index);
-}
-
-export async function upsertIndexEntry(call) {
-  const index = await getIndex();
-  const entry = lightEntry(call);
-  const pos = index.findIndex((e) => e.id === call.id);
-  if (pos === -1) index.push(entry);
-  else index[pos] = entry;
-  await saveIndex(index);
-}
-
-export async function removeIndexEntry(id) {
-  const index = await getIndex();
-  await saveIndex(index.filter((e) => e.id !== id));
 }
 
 /* ---------------- insights normalizer ---------------- */
