@@ -3,7 +3,7 @@ import {
   ArrowLeft, FileText, Trash2, Search, RefreshCw, Copy, Check,
   AlertTriangle, Loader2, Quote, Lightbulb, HelpCircle, TrendingUp, Clock,
   X, Inbox, Target, ShieldAlert, ListChecks, FileUp, Users, KeyRound,
-  LogOut, Plus
+  LogOut, Plus, BookOpen, Download
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -747,6 +747,251 @@ function PasswordPanel({ api, showNotice, onClose }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Sales Call FAQ panel                                                */
+/* ------------------------------------------------------------------ */
+
+function downloadBlob(content, mime, filename) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function faqToText(faq) {
+  const lines = [];
+  lines.push("FINEXER SALES CALL FAQ");
+  lines.push(
+    "Built from " + faq.totalCalls + " decoded client intro calls. Counts show how many clients asked each question."
+  );
+  lines.push("");
+  for (const cat of faq.categories) {
+    lines.push(cat.title.toUpperCase());
+    for (const it of cat.items) {
+      lines.push(
+        "- " + it.question + " (asked by " + it.count +
+        (it.asked_by.length ? ": " + it.asked_by.join(", ") : "") + ")"
+      );
+    }
+    lines.push("");
+  }
+  if (faq.common_objections && faq.common_objections.length) {
+    lines.push("COMMON OBJECTIONS AND CONCERNS");
+    for (const o of faq.common_objections) {
+      lines.push(
+        "- " + o.objection + " (raised by " + o.count +
+        (o.raised_by.length ? ": " + o.raised_by.join(", ") : "") + ")"
+      );
+    }
+  }
+  return lines.join("\n").trim();
+}
+
+function faqToWordHtml(faq) {
+  const esc = (s) =>
+    String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let html =
+    "<html><head><meta charset='utf-8'><title>Finexer Sales Call FAQ</title></head>" +
+    "<body style='font-family:Calibri,Arial,sans-serif;color:#101B33;'>" +
+    "<h1 style='color:#004AAD;'>Finexer Sales Call FAQ</h1>" +
+    "<p>Built from " + faq.totalCalls +
+    " decoded client intro calls. Counts show how many clients asked each question.</p>";
+  for (const cat of faq.categories) {
+    html += "<h2 style='color:#3057C3;'>" + esc(cat.title) + "</h2><ul>";
+    for (const it of cat.items) {
+      html +=
+        "<li><b>" + esc(it.question) + "</b> <span style='color:#56617A;'>(asked by " +
+        it.count + (it.asked_by.length ? ": " + esc(it.asked_by.join(", ")) : "") +
+        ")</span></li>";
+    }
+    html += "</ul>";
+  }
+  if (faq.common_objections && faq.common_objections.length) {
+    html += "<h2 style='color:#3057C3;'>Common objections and concerns</h2><ul>";
+    for (const o of faq.common_objections) {
+      html +=
+        "<li><b>" + esc(o.objection) + "</b> <span style='color:#56617A;'>(raised by " +
+        o.count + (o.raised_by.length ? ": " + esc(o.raised_by.join(", ")) : "") +
+        ")</span></li>";
+    }
+    html += "</ul>";
+  }
+  html += "</body></html>";
+  return html;
+}
+
+function faqToCsv(faq) {
+  const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
+  const rows = [["Section", "Category", "Question or objection", "Times raised", "Raised by"]];
+  for (const cat of faq.categories) {
+    for (const it of cat.items) {
+      rows.push(["Question", cat.title, it.question, it.count, it.asked_by.join("; ")]);
+    }
+  }
+  for (const o of faq.common_objections || []) {
+    rows.push(["Objection", "Objections", o.objection, o.count, (o.raised_by || []).join("; ")]);
+  }
+  return rows.map((r) => r.map(q).join(",")).join("\r\n");
+}
+
+function FaqPanel({ api, showNotice }) {
+  const [faq, setFaq] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [copiedFaq, setCopiedFaq] = useState(false);
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const d = await api("/.netlify/functions/faq", {
+        method: "POST",
+        body: { action: "generate" },
+      });
+      setFaq(d.faq);
+    } catch (e) {
+      showNotice(e.message);
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div>
+      <h2 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px" }}>
+        Sales Call FAQ
+      </h2>
+      <p style={{ fontSize: 13.5, color: C.muted, margin: "0 0 16px", lineHeight: 1.55 }}>
+        Pulls every question clients asked across all decoded calls, merges
+        duplicates, and groups them by theme with counts. Share it with new
+        salespeople so they know what to expect on intro calls.
+      </p>
+
+      <div className="flex items-center gap-2 mb-5" style={{ flexWrap: "wrap" }}>
+        <button
+          className="fcd-btn flex items-center gap-2"
+          style={{ ...btnPrimary, opacity: busy ? 0.75 : 1 }}
+          disabled={busy}
+          onClick={generate}
+        >
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+          {faq ? "Regenerate FAQ" : "Generate FAQ"}
+        </button>
+        {faq && (
+          <>
+            <button
+              className="fcd-btn flex items-center gap-2"
+              style={btnGhost}
+              onClick={() =>
+                downloadBlob(
+                  faqToWordHtml(faq),
+                  "application/msword",
+                  "Finexer-Sales-Call-FAQ.doc"
+                )
+              }
+            >
+              <Download size={13} /> Word
+            </button>
+            <button
+              className="fcd-btn flex items-center gap-2"
+              style={btnGhost}
+              onClick={() =>
+                downloadBlob(faqToCsv(faq), "text/csv;charset=utf-8", "Finexer-Sales-Call-FAQ.csv")
+              }
+            >
+              <Download size={13} /> Excel (CSV)
+            </button>
+            <button
+              className="fcd-btn flex items-center gap-2"
+              style={btnGhost}
+              onClick={async () => {
+                const ok = await copyToClipboard(faqToText(faq));
+                if (ok) { setCopiedFaq(true); setTimeout(() => setCopiedFaq(false), 2000); }
+                else showNotice("Copy failed in this browser.");
+              }}
+            >
+              {copiedFaq ? <Check size={13} /> : <Copy size={13} />}
+              {copiedFaq ? "Copied" : "Copy"}
+            </button>
+          </>
+        )}
+      </div>
+
+      {busy && !faq && (
+        <div className="flex items-center gap-2" style={{ color: C.muted, fontSize: 13.5 }}>
+          <Loader2 size={14} className="animate-spin" /> Reading every decoded call and
+          grouping the questions, this takes a few seconds
+        </div>
+      )}
+
+      {!busy && !faq && (
+        <div className="rounded-xl text-center"
+          style={{ border: "1px dashed #C3CBDC", background: C.surface, padding: "36px 24px" }}>
+          <BookOpen size={24} style={{ color: C.faint, margin: "0 auto 10px", display: "block" }} />
+          <p style={{ margin: 0, fontSize: 13.5, color: C.muted, lineHeight: 1.6 }}>
+            Click Generate FAQ. It only reads decoded calls, nothing in the
+            library is changed.
+          </p>
+        </div>
+      )}
+
+      {faq && (
+        <div className="flex flex-col gap-4">
+          <div style={{ fontFamily: F.mono, fontSize: 11.5, color: C.faint }}>
+            Built from {faq.totalCalls} decoded calls &#183; generated {fmtDate(faq.generatedAt)}
+          </div>
+          {faq.categories.map((cat, ci) => (
+            <SectionCard key={ci} icon={HelpCircle} title={cat.title}>
+              <ul className="m-0 p-0" style={{ listStyle: "none" }}>
+                {cat.items.map((it, ii) => (
+                  <li key={ii} style={{ padding: "7px 0", borderTop: ii ? "1px solid " + C.line : "none" }}>
+                    <div className="flex items-start gap-2">
+                      <span style={{ color: C.accent, flexShrink: 0, lineHeight: 1.55 }}>&#8226;</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 14, lineHeight: 1.55, color: C.ink, fontWeight: 500 }}>
+                          {it.question}
+                        </div>
+                        <div style={{ fontFamily: F.mono, fontSize: 11, color: C.faint, marginTop: 2 }}>
+                          asked by {it.count}
+                          {it.asked_by.length ? ": " + it.asked_by.join(", ") : ""}
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </SectionCard>
+          ))}
+          {faq.common_objections && faq.common_objections.length > 0 && (
+            <SectionCard icon={ShieldAlert} title="Common objections and concerns" tone="accent">
+              <ul className="m-0 p-0" style={{ listStyle: "none" }}>
+                {faq.common_objections.map((o, oi) => (
+                  <li key={oi} style={{ padding: "7px 0", borderTop: oi ? "1px solid " + C.accentLine : "none" }}>
+                    <div className="flex items-start gap-2">
+                      <span style={{ color: C.accent, flexShrink: 0, lineHeight: 1.55 }}>&#8226;</span>
+                      <div>
+                        <div style={{ fontSize: 14, lineHeight: 1.55, color: C.ink, fontWeight: 500 }}>
+                          {o.objection}
+                        </div>
+                        <div style={{ fontFamily: F.mono, fontSize: 11, color: C.faint, marginTop: 2 }}>
+                          raised by {o.count}
+                          {o.raised_by && o.raised_by.length ? ": " + o.raised_by.join(", ") : ""}
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </SectionCard>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Main app                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -762,6 +1007,7 @@ export default function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [faqOpen, setFaqOpen] = useState(false);
   const [passOpen, setPassOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [dragOver, setDragOver] = useState(false);
@@ -1093,7 +1339,7 @@ export default function App() {
         <div className="max-w-3xl mx-auto px-5 flex items-center gap-3" style={{ height: 60 }}>
           <button
             className="fcd-btn flex items-center gap-2"
-            onClick={() => { setSelectedId(null); setAdminOpen(false); }}
+            onClick={() => { setSelectedId(null); setAdminOpen(false); setFaqOpen(false); }}
             style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
           >
             <Logo size={26} />
@@ -1106,11 +1352,18 @@ export default function App() {
             {me.name || me.email}
           </span>
           <RoleBadge role={me.role} />
+          <button
+            className="fcd-btn flex items-center gap-1"
+            style={{ ...btnGhost, padding: "6px 10px", fontSize: 12.5, ...(faqOpen ? { borderColor: C.accent, color: C.accent } : {}) }}
+            onClick={() => { setFaqOpen((v) => !v); setAdminOpen(false); setSelectedId(null); }}
+          >
+            <BookOpen size={13} /> FAQ
+          </button>
           {me.role === "admin" && (
             <button
               className="fcd-btn flex items-center gap-1"
               style={{ ...btnGhost, padding: "6px 10px", fontSize: 12.5, ...(adminOpen ? { borderColor: C.accent, color: C.accent } : {}) }}
-              onClick={() => { setAdminOpen((v) => !v); setSelectedId(null); }}
+              onClick={() => { setAdminOpen((v) => !v); setFaqOpen(false); setSelectedId(null); }}
             >
               <Users size={13} /> Team
             </button>
@@ -1141,6 +1394,8 @@ export default function App() {
 
         {adminOpen ? (
           <AdminPanel api={api} me={me} showNotice={showNotice} />
+        ) : faqOpen ? (
+          <FaqPanel api={api} showNotice={showNotice} />
         ) : selectedLight ? (
           /* ======================= DETAIL VIEW ======================= */
           <div>
