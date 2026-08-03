@@ -30,3 +30,11 @@ create index if not exists calls_uploaded_at_idx on calls (uploaded_at);
 -- tables, so no extra policies are needed.
 alter table users enable row level security;
 alter table calls enable row level security;
+
+-- Small key/value table for app-wide saved data (like the generated FAQ).
+create table if not exists app_state (
+  key text primary key,
+  value jsonb,
+  updated_at bigint
+);
+alter table app_state enable row level security;

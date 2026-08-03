@@ -838,10 +838,24 @@ function faqToCsv(faq) {
   return rows.map((r) => r.map(q).join(",")).join("\r\n");
 }
 
-function FaqPanel({ api, showNotice }) {
+function FaqPanel({ api, showNotice, canEdit }) {
   const [faq, setFaq] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [copiedFaq, setCopiedFaq] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const d = await api("/.netlify/functions/faq");
+        if (d && d.faq) setFaq(d.faq);
+      } catch (e) {
+        if (e.status !== 401) showNotice(e.message);
+      }
+      setLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const generate = async () => {
     setBusy(true);
@@ -851,6 +865,7 @@ function FaqPanel({ api, showNotice }) {
         body: { action: "generate" },
       });
       setFaq(d.faq);
+      showNotice("FAQ generated and saved. The whole team now sees this version.");
     } catch (e) {
       showNotice(e.message);
     }
@@ -863,21 +878,23 @@ function FaqPanel({ api, showNotice }) {
         Sales Call FAQ
       </h2>
       <p style={{ fontSize: 13.5, color: C.muted, margin: "0 0 16px", lineHeight: 1.55 }}>
-        Pulls every question clients asked across all decoded calls, merges
-        duplicates, and groups them by theme with counts. Share it with new
-        salespeople so they know what to expect on intro calls.
+        Every question clients asked across all decoded calls, merged and grouped
+        by theme with counts. The FAQ is generated once, saved, and shared with
+        the whole team. Regenerate only after new calls are decoded.
       </p>
 
       <div className="flex items-center gap-2 mb-5" style={{ flexWrap: "wrap" }}>
-        <button
-          className="fcd-btn flex items-center gap-2"
-          style={{ ...btnPrimary, opacity: busy ? 0.75 : 1 }}
-          disabled={busy}
-          onClick={generate}
-        >
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
-          {faq ? "Regenerate FAQ" : "Generate FAQ"}
-        </button>
+        {canEdit && (
+          <button
+            className="fcd-btn flex items-center gap-2"
+            style={{ ...btnPrimary, opacity: busy ? 0.75 : 1 }}
+            disabled={busy}
+            onClick={generate}
+          >
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <BookOpen size={14} />}
+            {faq ? "Regenerate FAQ" : "Generate FAQ"}
+          </button>
+        )}
         {faq && (
           <>
             <button
@@ -918,20 +935,23 @@ function FaqPanel({ api, showNotice }) {
         )}
       </div>
 
-      {busy && !faq && (
+      {(loading || (busy && !faq)) && (
         <div className="flex items-center gap-2" style={{ color: C.muted, fontSize: 13.5 }}>
-          <Loader2 size={14} className="animate-spin" /> Reading every decoded call and
-          grouping the questions, this takes a few seconds
+          <Loader2 size={14} className="animate-spin" />
+          {loading
+            ? "Loading the saved FAQ"
+            : "Reading every decoded call and grouping the questions, this takes a few seconds"}
         </div>
       )}
 
-      {!busy && !faq && (
+      {!loading && !busy && !faq && (
         <div className="rounded-xl text-center"
           style={{ border: "1px dashed #C3CBDC", background: C.surface, padding: "36px 24px" }}>
           <BookOpen size={24} style={{ color: C.faint, margin: "0 auto 10px", display: "block" }} />
           <p style={{ margin: 0, fontSize: 13.5, color: C.muted, lineHeight: 1.6 }}>
-            Click Generate FAQ. It only reads decoded calls, nothing in the
-            library is changed.
+            {canEdit
+              ? "No FAQ generated yet. Click Generate FAQ once, it will be saved for the whole team."
+              : "No FAQ generated yet. Ask a writer or admin to generate it."}
           </p>
         </div>
       )}
@@ -1395,7 +1415,7 @@ export default function App() {
         {adminOpen ? (
           <AdminPanel api={api} me={me} showNotice={showNotice} />
         ) : faqOpen ? (
-          <FaqPanel api={api} showNotice={showNotice} />
+          <FaqPanel api={api} showNotice={showNotice} canEdit={canEdit} />
         ) : selectedLight ? (
           /* ======================= DETAIL VIEW ======================= */
           <div>

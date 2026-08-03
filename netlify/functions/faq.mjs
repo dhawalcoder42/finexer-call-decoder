@@ -1,11 +1,13 @@
 /* /.netlify/functions/faq
-   POST { action: "generate" } -> aggregates questions across all decoded
-   calls and clusters them into a salesperson-ready FAQ using Gemini. */
+   GET  -> returns the saved FAQ (no Gemini call, any role)
+   POST { action: "generate" } -> rebuilds the FAQ from all decoded calls,
+   saves it to the database, returns it. Admin/writer only. */
 
 import { json, parseBody, requireAuth, sb } from "../lib/util.mjs";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 const MAX_LINES = 400;
+const STATE_KEY = "faq";
 
 const deDash = (s) => String(s || "").replace(/\u2014/g, "-").replace(/\u2013/g, "-");
 
@@ -50,8 +52,24 @@ ${objectionLines.length ? objectionLines.join("\n") : "(none recorded)"}`;
 }
 
 export const handler = async (event) => {
+  /* ---------- GET: return saved FAQ, no Gemini call ---------- */
+  if (event.httpMethod === "GET") {
+    const { error } = await requireAuth(event);
+    if (error) return error;
+    const client = sb();
+    const { data, error: dbErr } = await client
+      .from("app_state")
+      .select("value")
+      .eq("key", STATE_KEY)
+      .maybeSingle();
+    if (dbErr) return json(500, { error: "Database error: " + dbErr.message });
+    return json(200, { faq: data ? data.value : null });
+  }
+
   if (event.httpMethod !== "POST") return json(405, { error: "POST only." });
-  const { error } = await requireAuth(event);
+
+  /* ---------- POST generate: admin/writer only ---------- */
+  const { error } = await requireAuth(event, ["admin", "writer"]);
   if (error) return error;
 
   const body = parseBody(event);
@@ -176,14 +194,28 @@ export const handler = async (event) => {
           : [],
       }));
 
-    return json(200, {
-      faq: {
-        generatedAt: Date.now(),
-        totalCalls: usedCalls,
-        categories,
-        common_objections,
-      },
+    const faq = {
+      generatedAt: Date.now(),
+      totalCalls: usedCalls,
+      categories,
+      common_objections,
+    };
+
+    const { error: saveErr } = await client.from("app_state").upsert({
+      key: STATE_KEY,
+      value: faq,
+      updated_at: Date.now(),
     });
+    if (saveErr) {
+      return json(500, {
+        error:
+          "FAQ was generated but could not be saved: " +
+          saveErr.message +
+          ". Did you run the app_state SQL in Supabase?",
+      });
+    }
+
+    return json(200, { faq });
   } catch (e) {
     const reason = candidate.finishReason ? " (" + candidate.finishReason + ")" : "";
     return json(502, { error: "Could not parse the FAQ output" + reason + ". Retry." });
