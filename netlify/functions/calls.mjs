@@ -36,6 +36,20 @@ export const handler = async (event) => {
       return json(200, { call: rowToCall(data) });
     }
 
+    // Self-heal: any call stuck in "processing" for over 10 minutes (for
+    // example the browser was closed mid-analysis) goes back to the queue.
+    const staleCutoff = Date.now() - 10 * 60 * 1000;
+    await client
+      .from("calls")
+      .update({ status: "queued", processing_at: null })
+      .eq("status", "processing")
+      .is("processing_at", null);
+    await client
+      .from("calls")
+      .update({ status: "queued", processing_at: null })
+      .eq("status", "processing")
+      .lt("processing_at", staleCutoff);
+
     // Exclude transcript from the list query, it's the heavy column.
     const { data, error: dbErr } = await client
       .from("calls")
