@@ -779,6 +779,17 @@ function faqToText(faq) {
     }
     lines.push("");
   }
+  if (faq.pain_points && faq.pain_points.length) {
+    lines.push("PAIN POINTS AND HOW FINEXER ANSWERS THEM");
+    for (const p of faq.pain_points) {
+      lines.push(
+        "- " + p.pain + " (raised by " + p.count +
+        (p.raised_by.length ? ": " + p.raised_by.join(", ") : "") + ")"
+      );
+      if (p.solution) lines.push("  Finexer angle: " + p.solution);
+    }
+    lines.push("");
+  }
   if (faq.common_objections && faq.common_objections.length) {
     lines.push("COMMON OBJECTIONS AND CONCERNS");
     for (const o of faq.common_objections) {
@@ -810,6 +821,20 @@ function faqToWordHtml(faq) {
     }
     html += "</ul>";
   }
+  if (faq.pain_points && faq.pain_points.length) {
+    html += "<h2 style='color:#3057C3;'>Pain points and how Finexer answers them</h2><ul>";
+    for (const p of faq.pain_points) {
+      html +=
+        "<li><b>" + esc(p.pain) + "</b> <span style='color:#56617A;'>(raised by " +
+        p.count + (p.raised_by.length ? ": " + esc(p.raised_by.join(", ")) : "") +
+        ")</span>" +
+        (p.solution
+          ? "<br/><span style='color:#004AAD;'>Finexer angle: " + esc(p.solution) + "</span>"
+          : "") +
+        "</li>";
+    }
+    html += "</ul>";
+  }
   if (faq.common_objections && faq.common_objections.length) {
     html += "<h2 style='color:#3057C3;'>Common objections and concerns</h2><ul>";
     for (const o of faq.common_objections) {
@@ -826,14 +851,17 @@ function faqToWordHtml(faq) {
 
 function faqToCsv(faq) {
   const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
-  const rows = [["Section", "Category", "Question or objection", "Times raised", "Raised by"]];
+  const rows = [["Section", "Category", "Question / objection / pain point", "Times raised", "Raised by", "Finexer answer"]];
   for (const cat of faq.categories) {
     for (const it of cat.items) {
-      rows.push(["Question", cat.title, it.question, it.count, it.asked_by.join("; ")]);
+      rows.push(["Question", cat.title, it.question, it.count, it.asked_by.join("; "), ""]);
     }
   }
+  for (const p of faq.pain_points || []) {
+    rows.push(["Pain point", "Pain points", p.pain, p.count, (p.raised_by || []).join("; "), p.solution || ""]);
+  }
   for (const o of faq.common_objections || []) {
-    rows.push(["Objection", "Objections", o.objection, o.count, (o.raised_by || []).join("; ")]);
+    rows.push(["Objection", "Objections", o.objection, o.count, (o.raised_by || []).join("; "), ""]);
   }
   return rows.map((r) => r.map(q).join(",")).join("\r\n");
 }
@@ -983,6 +1011,51 @@ function FaqPanel({ api, showNotice, canEdit }) {
               </ul>
             </SectionCard>
           ))}
+          {faq.pain_points && faq.pain_points.length > 0 && (
+            <SectionCard icon={AlertTriangle} title="Pain points and how Finexer answers them">
+              <ul className="m-0 p-0" style={{ listStyle: "none" }}>
+                {faq.pain_points.map((p, pi) => (
+                  <li key={pi} style={{ padding: "9px 0", borderTop: pi ? "1px solid " + C.line : "none" }}>
+                    <div className="flex items-start gap-2">
+                      <span style={{ color: C.accent, flexShrink: 0, lineHeight: 1.55 }}>&#8226;</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 14, lineHeight: 1.55, color: C.ink, fontWeight: 500 }}>
+                          {p.pain}
+                        </div>
+                        <div style={{ fontFamily: F.mono, fontSize: 11, color: C.faint, marginTop: 2 }}>
+                          raised by {p.count}
+                          {p.raised_by.length ? ": " + p.raised_by.join(", ") : ""}
+                        </div>
+                        {p.solution && (
+                          <div
+                            className="rounded-lg"
+                            style={{
+                              background: C.accentSoft,
+                              border: "1px solid " + C.accentLine,
+                              padding: "8px 11px",
+                              marginTop: 7,
+                              fontSize: 13,
+                              lineHeight: 1.55,
+                              color: C.ink,
+                            }}
+                          >
+                            <span style={{ fontFamily: F.mono, fontSize: 10, letterSpacing: "0.08em", color: C.accent, display: "block", marginBottom: 2 }}>
+                              FINEXER ANGLE
+                            </span>
+                            {p.solution}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <p style={{ margin: "10px 0 0", fontSize: 11.5, color: C.faint }}>
+                Angles are based on Finexer's positioning and what was said on
+                calls. Verify specifics like pricing before quoting them to a client.
+              </p>
+            </SectionCard>
+          )}
           {faq.common_objections && faq.common_objections.length > 0 && (
             <SectionCard icon={ShieldAlert} title="Common objections and concerns" tone="accent">
               <ul className="m-0 p-0" style={{ listStyle: "none" }}>

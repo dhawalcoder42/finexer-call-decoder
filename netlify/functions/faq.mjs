@@ -11,19 +11,34 @@ const STATE_KEY = "faq";
 
 const deDash = (s) => String(s || "").replace(/\u2014/g, "-").replace(/\u2013/g, "-");
 
-function buildPrompt(questionLines, objectionLines, totalCalls) {
-  return `You are building a Sales Call FAQ for new salespeople at Finexer, a UK FCA-authorised open banking infrastructure provider. Below are real questions prospective clients asked on intro calls, and objections they raised. Each line is "CLIENT_LABEL :: text".
+function buildPrompt(questionLines, objectionLines, painLines, totalCalls) {
+  return `You are building a Sales Call FAQ for new salespeople at Finexer, a UK FCA-authorised open banking infrastructure provider. Below are real questions prospective clients asked on intro calls, objections they raised, and pain points they voiced. Each line is "CLIENT_LABEL :: text".
 
 Your job:
 1. Merge duplicate or near-duplicate questions into one canonical, naturally phrased question.
 2. Group questions into 4 to 8 themed categories (for example: Pricing and commercials, Integration and technical, Compliance and regulation, Bank coverage, Product capabilities, Timelines and onboarding). Only use categories that actually fit the data.
 3. For each merged question, count how many distinct clients asked it and list their labels.
 4. Do the same merge-and-count for objections, as a flat list.
+5. Do the same merge-and-count for pain points, and for each merged pain point add a short "solution": how a salesperson can position Finexer against it.
+
+FINEXER FACTS you may use for solutions (use ONLY these, never invent numbers or features):
+- FCA-authorised open banking infrastructure provider (FRN 925695), UK-focused, PSD2-compliant. An infrastructure layer, not software.
+- Data (AIS): real-time account, balance and transaction data from almost all major UK banks. Can request up to 8 years of transaction history where the bank supports it.
+- Payments (PIS): Pay by Bank, account-to-account payments that settle instantly via Faster Payments. Strong for payouts and collections. Can save up to 90% on transactional costs versus cards.
+- Invoice Tracker: invoice-linked payment requests with automatic matching of incoming payments against invoices, exception flags for partial or failed payments, and an audit log. It supports reconciliation workflows, never claim it fully automates reconciliation.
+- Verification: bank-based name verification, facial recognition, document data extraction. It does NOT do PEP screening, sanctions checks or AML monitoring, never claim those.
+- Data enrichment: merchant identification and transaction categorisation, 95%+ accuracy. Never name the enrichment partner.
+- Usage-based pricing only. White-label. Hands-on onboarding support for 3 to 5 weeks. Typically deploys 2 to 3x faster than building direct bank integrations.
+
+Solution rules:
+- Each solution under 35 words, plain sales language, no jargon.
+- Ground every solution in the facts above or in what clients were told on calls. Use hedged phrasing like "can help reduce" rather than absolute claims.
+- If a pain point has no genuine Finexer answer, write exactly: "No direct product answer, flag this to the team."
 
 Hard rules:
 - Respond with ONLY one valid JSON object. No markdown fences, no commentary.
 - English only. Do not use em dashes anywhere.
-- Only use the questions and objections provided. Never invent new ones.
+- Only use the questions, objections and pain points provided. Never invent new ones.
 - Keep each canonical question under 20 words, phrased the way a client would ask it.
 - Sort categories and items by how frequently they come up, most common first.
 
@@ -39,6 +54,9 @@ Return exactly this JSON shape:
   ],
   "common_objections": [
     { "objection": "canonical objection", "count": 2, "raised_by": ["Client A"] }
+  ],
+  "pain_points": [
+    { "pain": "canonical pain point", "count": 3, "raised_by": ["Client A", "Client B"], "solution": "how Finexer answers it" }
   ]
 }
 
@@ -48,7 +66,10 @@ QUESTIONS:
 ${questionLines.join("\n")}
 
 OBJECTIONS:
-${objectionLines.length ? objectionLines.join("\n") : "(none recorded)"}`;
+${objectionLines.length ? objectionLines.join("\n") : "(none recorded)"}
+
+PAIN POINTS:
+${painLines.length ? painLines.join("\n") : "(none recorded)"}`;
 }
 
 export const handler = async (event) => {
@@ -88,6 +109,7 @@ export const handler = async (event) => {
 
   const questionLines = [];
   const objectionLines = [];
+  const painLines = [];
   let usedCalls = 0;
 
   for (const row of data || []) {
@@ -98,12 +120,16 @@ export const handler = async (event) => {
       String(row.filename || "").replace(/\.txt$/i, "");
     const qs = Array.isArray(i.questions_they_asked) ? i.questions_they_asked : [];
     const obs = Array.isArray(i.objections_or_concerns) ? i.objections_or_concerns : [];
-    if (qs.length || obs.length) usedCalls++;
+    const pains = Array.isArray(i.pain_points) ? i.pain_points : [];
+    if (qs.length || obs.length || pains.length) usedCalls++;
     for (const q of qs) {
       if (questionLines.length < MAX_LINES) questionLines.push(label + " :: " + q);
     }
     for (const o of obs) {
       if (objectionLines.length < MAX_LINES) objectionLines.push(label + " :: " + o);
+    }
+    for (const p of pains) {
+      if (painLines.length < MAX_LINES) painLines.push(label + " :: " + p);
     }
   }
 
@@ -127,7 +153,7 @@ export const handler = async (event) => {
           contents: [
             {
               parts: [
-                { text: buildPrompt(questionLines, objectionLines, usedCalls) },
+                { text: buildPrompt(questionLines, objectionLines, painLines, usedCalls) },
               ],
             },
           ],
@@ -194,11 +220,23 @@ export const handler = async (event) => {
           : [],
       }));
 
+    const pain_points = (Array.isArray(raw.pain_points) ? raw.pain_points : [])
+      .filter((p) => p && p.pain)
+      .map((p) => ({
+        pain: deDash(p.pain),
+        count: Number(p.count) || 1,
+        raised_by: Array.isArray(p.raised_by)
+          ? p.raised_by.map((a) => deDash(a)).slice(0, 12)
+          : [],
+        solution: deDash(p.solution || ""),
+      }));
+
     const faq = {
       generatedAt: Date.now(),
       totalCalls: usedCalls,
       categories,
       common_objections,
+      pain_points,
     };
 
     const { error: saveErr } = await client.from("app_state").upsert({
