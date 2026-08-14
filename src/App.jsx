@@ -3,7 +3,7 @@ import {
   ArrowLeft, FileText, Trash2, Search, RefreshCw, Copy, Check,
   AlertTriangle, Loader2, Quote, Lightbulb, HelpCircle, TrendingUp, Clock,
   X, Inbox, Target, ShieldAlert, ListChecks, FileUp, Users, KeyRound,
-  LogOut, Plus, BookOpen, Download
+  LogOut, Plus, BookOpen, Download, Repeat
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -747,7 +747,7 @@ function PasswordPanel({ api, showNotice, onClose }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Sales Call FAQ panel                                                */
+/* Shared download helper                                              */
 /* ------------------------------------------------------------------ */
 
 function downloadBlob(content, mime, filename) {
@@ -761,6 +761,10 @@ function downloadBlob(content, mime, filename) {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
+
+/* ------------------------------------------------------------------ */
+/* Sales Call FAQ panel                                                */
+/* ------------------------------------------------------------------ */
 
 function faqToText(faq) {
   const lines = [];
@@ -1085,6 +1089,243 @@ function FaqPanel({ api, showNotice, canEdit }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Competitor switchers panel                                          */
+/* ------------------------------------------------------------------ */
+
+const REL_STYLE = {
+  "switching from": { bg: "#EAF6EE", fg: "#1E7A45" },
+  evaluating: { bg: "#FAF1DD", fg: "#96610F" },
+  "currently using": { bg: "#E9EEFB", fg: "#3057C3" },
+  mentioned: { bg: "#ECEFF5", fg: "#56617A" },
+};
+
+function compToText(report) {
+  const lines = [];
+  lines.push("FINEXER COMPETITOR SWITCHERS REPORT");
+  lines.push("Built from " + report.totalCalls + " decoded calls that mention a competitor.");
+  lines.push("");
+  for (const comp of report.competitors) {
+    lines.push(comp.name.toUpperCase() + " (" + comp.clients.length + " clients)");
+    for (const cl of comp.clients) {
+      lines.push("- " + cl.client + " [" + cl.relationship + "]" + (cl.why ? ": " + cl.why : ""));
+      for (const p of cl.pain_points || []) {
+        lines.push("    Pain: " + p);
+      }
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trim();
+}
+
+function compToWordHtml(report) {
+  const esc = (s) =>
+    String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let html =
+    "<html><head><meta charset='utf-8'><title>Finexer Competitor Switchers Report</title></head>" +
+    "<body style='font-family:Calibri,Arial,sans-serif;color:#101B33;'>" +
+    "<h1 style='color:#004AAD;'>Finexer Competitor Switchers Report</h1>" +
+    "<p>Built from " + report.totalCalls + " decoded calls that mention a competitor.</p>";
+  for (const comp of report.competitors) {
+    html += "<h2 style='color:#3057C3;'>" + esc(comp.name) + " (" + comp.clients.length + " clients)</h2>";
+    for (const cl of comp.clients) {
+      html +=
+        "<p style='margin-bottom:2px;'><b>" + esc(cl.client) + "</b> <span style='color:#56617A;'>[" +
+        esc(cl.relationship) + "]</span>" + (cl.why ? "<br/>" + esc(cl.why) : "") + "</p>";
+      if (cl.pain_points && cl.pain_points.length) {
+        html += "<ul style='margin-top:2px;'>";
+        for (const p of cl.pain_points) html += "<li>" + esc(p) + "</li>";
+        html += "</ul>";
+      }
+    }
+  }
+  html += "</body></html>";
+  return html;
+}
+
+function compToCsv(report) {
+  const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
+  const rows = [["Competitor", "Client", "Relationship", "Why", "Pain points"]];
+  for (const comp of report.competitors) {
+    for (const cl of comp.clients) {
+      rows.push([comp.name, cl.client, cl.relationship, cl.why || "", (cl.pain_points || []).join("; ")]);
+    }
+  }
+  return rows.map((r) => r.map(q).join(",")).join("\r\n");
+}
+
+function CompetitorsPanel({ api, showNotice, canEdit }) {
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [copiedComp, setCopiedComp] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const d = await api("/.netlify/functions/competitors");
+        if (d && d.report) setReport(d.report);
+      } catch (e) {
+        if (e.status !== 401) showNotice(e.message);
+      }
+      setLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const d = await api("/.netlify/functions/competitors", {
+        method: "POST",
+        body: { action: "generate" },
+      });
+      setReport(d.report);
+      showNotice("Report generated and saved. The whole team now sees this version.");
+    } catch (e) {
+      showNotice(e.message);
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div>
+      <h2 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px" }}>
+        Competitor switchers
+      </h2>
+      <p style={{ fontSize: 13.5, color: C.muted, margin: "0 0 16px", lineHeight: 1.55 }}>
+        Clients from decoded calls who mentioned a competitor, grouped by
+        competitor, with whether they are switching from it, evaluating it, or
+        just using it, plus their reasons and pain points. Generated once, saved,
+        and shared with the whole team.
+      </p>
+
+      <div className="flex items-center gap-2 mb-5" style={{ flexWrap: "wrap" }}>
+        {canEdit && (
+          <button
+            className="fcd-btn flex items-center gap-2"
+            style={{ ...btnPrimary, opacity: busy ? 0.75 : 1 }}
+            disabled={busy}
+            onClick={generate}
+          >
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Repeat size={14} />}
+            {report ? "Regenerate report" : "Generate report"}
+          </button>
+        )}
+        {report && (
+          <>
+            <button
+              className="fcd-btn flex items-center gap-2"
+              style={btnGhost}
+              onClick={() =>
+                downloadBlob(
+                  compToWordHtml(report),
+                  "application/msword",
+                  "Finexer-Competitor-Switchers.doc"
+                )
+              }
+            >
+              <Download size={13} /> Word
+            </button>
+            <button
+              className="fcd-btn flex items-center gap-2"
+              style={btnGhost}
+              onClick={() =>
+                downloadBlob(compToCsv(report), "text/csv;charset=utf-8", "Finexer-Competitor-Switchers.csv")
+              }
+            >
+              <Download size={13} /> Excel (CSV)
+            </button>
+            <button
+              className="fcd-btn flex items-center gap-2"
+              style={btnGhost}
+              onClick={async () => {
+                const ok = await copyToClipboard(compToText(report));
+                if (ok) { setCopiedComp(true); setTimeout(() => setCopiedComp(false), 2000); }
+                else showNotice("Copy failed in this browser.");
+              }}
+            >
+              {copiedComp ? <Check size={13} /> : <Copy size={13} />}
+              {copiedComp ? "Copied" : "Copy"}
+            </button>
+          </>
+        )}
+      </div>
+
+      {(loading || (busy && !report)) && (
+        <div className="flex items-center gap-2" style={{ color: C.muted, fontSize: 13.5 }}>
+          <Loader2 size={14} className="animate-spin" />
+          {loading
+            ? "Loading the saved report"
+            : "Reading competitor mentions across all decoded calls, this takes a few seconds"}
+        </div>
+      )}
+
+      {!loading && !busy && !report && (
+        <div className="rounded-xl text-center"
+          style={{ border: "1px dashed #C3CBDC", background: C.surface, padding: "36px 24px" }}>
+          <Repeat size={24} style={{ color: C.faint, margin: "0 auto 10px", display: "block" }} />
+          <p style={{ margin: 0, fontSize: 13.5, color: C.muted, lineHeight: 1.6 }}>
+            {canEdit
+              ? "No report generated yet. Click Generate report once, it will be saved for the whole team."
+              : "No report generated yet. Ask a writer or admin to generate it."}
+          </p>
+        </div>
+      )}
+
+      {report && (
+        <div className="flex flex-col gap-4">
+          <div style={{ fontFamily: F.mono, fontSize: 11.5, color: C.faint }}>
+            Built from {report.totalCalls} calls mentioning a competitor &#183; generated {fmtDate(report.generatedAt)}
+          </div>
+          {report.competitors.length === 0 && (
+            <p style={{ fontSize: 13.5, color: C.muted }}>
+              No competitor relationships found in the decoded calls yet.
+            </p>
+          )}
+          {report.competitors.map((comp, ci) => (
+            <SectionCard key={ci} icon={Repeat} title={comp.name + " (" + comp.clients.length + ")"}>
+              <div className="flex flex-col">
+                {comp.clients.map((cl, li) => {
+                  const rs = REL_STYLE[cl.relationship] || REL_STYLE.mentioned;
+                  return (
+                    <div key={li} style={{ padding: "10px 0", borderTop: li ? "1px solid " + C.line : "none" }}>
+                      <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: C.ink }}>{cl.client}</span>
+                        <span style={{
+                          fontFamily: F.mono, fontSize: 10.5, fontWeight: 500,
+                          color: rs.fg, background: rs.bg, borderRadius: 999, padding: "2px 8px",
+                        }}>
+                          {cl.relationship}
+                        </span>
+                      </div>
+                      {cl.why && (
+                        <p style={{ margin: "4px 0 0", fontSize: 13.5, lineHeight: 1.55, color: C.ink }}>
+                          {cl.why}
+                        </p>
+                      )}
+                      {cl.pain_points && cl.pain_points.length > 0 && (
+                        <ul className="m-0 p-0" style={{ listStyle: "none", marginTop: 5 }}>
+                          {cl.pain_points.map((p, pi) => (
+                            <li key={pi} className="flex gap-2" style={{ fontSize: 12.5, lineHeight: 1.5, color: C.muted, padding: "1px 0" }}>
+                              <span style={{ color: C.accent, flexShrink: 0 }}>&#8226;</span>
+                              <span>{p}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </SectionCard>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Main app                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -1101,6 +1342,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [adminOpen, setAdminOpen] = useState(false);
   const [faqOpen, setFaqOpen] = useState(false);
+  const [compOpen, setCompOpen] = useState(false);
   const [passOpen, setPassOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [dragOver, setDragOver] = useState(false);
@@ -1432,7 +1674,7 @@ export default function App() {
         <div className="max-w-3xl mx-auto px-5 flex items-center gap-3" style={{ height: 60 }}>
           <button
             className="fcd-btn flex items-center gap-2"
-            onClick={() => { setSelectedId(null); setAdminOpen(false); setFaqOpen(false); }}
+            onClick={() => { setSelectedId(null); setAdminOpen(false); setFaqOpen(false); setCompOpen(false); }}
             style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
           >
             <Logo size={26} />
@@ -1448,15 +1690,22 @@ export default function App() {
           <button
             className="fcd-btn flex items-center gap-1"
             style={{ ...btnGhost, padding: "6px 10px", fontSize: 12.5, ...(faqOpen ? { borderColor: C.accent, color: C.accent } : {}) }}
-            onClick={() => { setFaqOpen((v) => !v); setAdminOpen(false); setSelectedId(null); }}
+            onClick={() => { setFaqOpen((v) => !v); setCompOpen(false); setAdminOpen(false); setSelectedId(null); }}
           >
             <BookOpen size={13} /> FAQ
+          </button>
+          <button
+            className="fcd-btn flex items-center gap-1"
+            style={{ ...btnGhost, padding: "6px 10px", fontSize: 12.5, ...(compOpen ? { borderColor: C.accent, color: C.accent } : {}) }}
+            onClick={() => { setCompOpen((v) => !v); setFaqOpen(false); setAdminOpen(false); setSelectedId(null); }}
+          >
+            <Repeat size={13} /> Switchers
           </button>
           {me.role === "admin" && (
             <button
               className="fcd-btn flex items-center gap-1"
               style={{ ...btnGhost, padding: "6px 10px", fontSize: 12.5, ...(adminOpen ? { borderColor: C.accent, color: C.accent } : {}) }}
-              onClick={() => { setAdminOpen((v) => !v); setFaqOpen(false); setSelectedId(null); }}
+              onClick={() => { setAdminOpen((v) => !v); setFaqOpen(false); setCompOpen(false); setSelectedId(null); }}
             >
               <Users size={13} /> Team
             </button>
@@ -1489,6 +1738,8 @@ export default function App() {
           <AdminPanel api={api} me={me} showNotice={showNotice} />
         ) : faqOpen ? (
           <FaqPanel api={api} showNotice={showNotice} canEdit={canEdit} />
+        ) : compOpen ? (
+          <CompetitorsPanel api={api} showNotice={showNotice} canEdit={canEdit} />
         ) : selectedLight ? (
           /* ======================= DETAIL VIEW ======================= */
           <div>
