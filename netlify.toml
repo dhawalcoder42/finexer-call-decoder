@@ -2,3 +2,8 @@
   command = "npm run build"
   publish = "dist"
   functions = "netlify/functions"
+
+# Background queue processor: decodes queued calls every 10 minutes,
+# even when nobody has the app open. Also keeps Supabase free tier awake.
+[functions."process-queue"]
+  schedule = "*/10 * * * *"
