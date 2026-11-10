@@ -3,7 +3,7 @@ import {
   ArrowLeft, FileText, Trash2, Search, RefreshCw, Copy, Check,
   AlertTriangle, Loader2, Quote, Lightbulb, HelpCircle, TrendingUp, Clock,
   X, Inbox, Target, ShieldAlert, ListChecks, FileUp, Users, KeyRound,
-  LogOut, Plus, BookOpen, Download, Repeat
+  LogOut, Plus, BookOpen, Download, Repeat, BarChart3, Building2
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -1089,7 +1089,7 @@ function FaqPanel({ api, showNotice, canEdit }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Competitor switchers panel                                          */
+/* Sales Intelligence panel (replaces the old Switchers report)        */
 /* ------------------------------------------------------------------ */
 
 const REL_STYLE = {
@@ -1099,70 +1099,137 @@ const REL_STYLE = {
   mentioned: { bg: "#ECEFF5", fg: "#56617A" },
 };
 
-function compToText(report) {
+const DEAL_OPTIONS = ["open", "engaged", "converted", "lost"];
+const DEAL_STYLE = {
+  converted: { bg: "#EAF6EE", fg: "#1E7A45" },
+  engaged: { bg: "#E9EEFB", fg: "#3057C3" },
+  "at risk": { bg: "#FAF1DD", fg: "#96610F" },
+  lost: { bg: "#FBEDEA", fg: "#B02A1C" },
+  open: { bg: "#ECEFF5", fg: "#56617A" },
+};
+
+function DealChip({ status, manual }) {
+  const s = DEAL_STYLE[status] || DEAL_STYLE.open;
+  return (
+    <span
+      title={manual ? "Set manually by the team" : "Guessed from the call. Set it manually on the call page."}
+      style={{
+        fontFamily: F.mono, fontSize: 10.5, fontWeight: 500, whiteSpace: "nowrap",
+        color: s.fg, background: s.bg, borderRadius: 999, padding: "2px 8px",
+        border: manual ? "1px solid " + s.fg + "33" : "1px dashed " + s.fg + "66",
+        flexShrink: 0,
+      }}
+    >
+      {status}{manual ? "" : " ?"}
+    </span>
+  );
+}
+
+function intelToText(r) {
   const lines = [];
-  lines.push("FINEXER COMPETITOR SWITCHERS REPORT");
-  lines.push("Built from " + report.totalCalls + " decoded calls that mention a competitor.");
+  lines.push("FINEXER SALES INTELLIGENCE REPORT");
+  lines.push(
+    "Built from " + r.totalCalls + " decoded calls (" + r.analyzedCalls + " analysed). Statuses without a team-set value are guesses from the call."
+  );
   lines.push("");
-  for (const comp of report.competitors) {
+  lines.push("PRODUCT INTEREST");
+  for (const p of r.products || []) lines.push("- " + p.name + ": " + p.count);
+  lines.push("");
+  lines.push("TOP ISSUES CLIENTS TALK ABOUT");
+  for (const t of r.issues || []) {
+    lines.push("- " + t.theme + " (" + t.count + " calls): " + t.clients.map((c) => c.label).join(", "));
+    for (const ex of t.examples || []) lines.push('    e.g. "' + ex + '"');
+  }
+  lines.push("");
+  lines.push("ALTERNATIVES AND WHY FINEXER");
+  for (const comp of r.alternatives || []) {
     lines.push(comp.name.toUpperCase() + " (" + comp.clients.length + " clients)");
     for (const cl of comp.clients) {
-      lines.push("- " + cl.client + " [" + cl.relationship + "]" + (cl.why ? ": " + cl.why : ""));
-      for (const p of cl.pain_points || []) {
-        lines.push("    Pain: " + p);
-      }
+      lines.push("- " + cl.label + " [" + cl.relationship + ", " + cl.status + (cl.manual ? "" : " guess") + "]");
+      if (cl.why_alternative) lines.push("    Why the alternative: " + cl.why_alternative);
+      if (cl.why_finexer) lines.push("    Why Finexer: " + cl.why_finexer);
     }
-    lines.push("");
+  }
+  lines.push("");
+  lines.push("INDUSTRIES");
+  for (const ind of r.industries || []) {
+    lines.push("- " + ind.name + " (" + ind.count + "): top issues " + (ind.top_issues.join("; ") || "none") + ". Clients: " + ind.clients.join(", "));
   }
   return lines.join("\n").trim();
 }
 
-function compToWordHtml(report) {
-  const esc = (s) =>
-    String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function intelToWordHtml(r) {
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   let html =
-    "<html><head><meta charset='utf-8'><title>Finexer Competitor Switchers Report</title></head>" +
+    "<html><head><meta charset='utf-8'><title>Finexer Sales Intelligence Report</title></head>" +
     "<body style='font-family:Calibri,Arial,sans-serif;color:#101B33;'>" +
-    "<h1 style='color:#004AAD;'>Finexer Competitor Switchers Report</h1>" +
-    "<p>Built from " + report.totalCalls + " decoded calls that mention a competitor.</p>";
-  for (const comp of report.competitors) {
-    html += "<h2 style='color:#3057C3;'>" + esc(comp.name) + " (" + comp.clients.length + " clients)</h2>";
-    for (const cl of comp.clients) {
-      html +=
-        "<p style='margin-bottom:2px;'><b>" + esc(cl.client) + "</b> <span style='color:#56617A;'>[" +
-        esc(cl.relationship) + "]</span>" + (cl.why ? "<br/>" + esc(cl.why) : "") + "</p>";
-      if (cl.pain_points && cl.pain_points.length) {
-        html += "<ul style='margin-top:2px;'>";
-        for (const p of cl.pain_points) html += "<li>" + esc(p) + "</li>";
-        html += "</ul>";
-      }
+    "<h1 style='color:#004AAD;'>Finexer Sales Intelligence Report</h1>" +
+    "<p>Built from " + r.totalCalls + " decoded calls (" + r.analyzedCalls + " analysed). Statuses marked (guess) were inferred from the call, not set by the team.</p>";
+  html += "<h2 style='color:#3057C3;'>Product interest</h2><ul>";
+  for (const p of r.products || []) html += "<li>" + esc(p.name) + ": " + p.count + "</li>";
+  html += "</ul><h2 style='color:#3057C3;'>Top issues clients talk about</h2>";
+  for (const t of r.issues || []) {
+    html += "<p style='margin-bottom:2px;'><b>" + esc(t.theme) + "</b> (" + t.count + " calls): " + esc(t.clients.map((c) => c.label).join(", ")) + "</p>";
+    if (t.examples && t.examples.length) {
+      html += "<ul style='margin-top:2px;'>";
+      for (const ex of t.examples) html += "<li><i>" + esc(ex) + "</i></li>";
+      html += "</ul>";
     }
   }
-  html += "</body></html>";
+  html += "<h2 style='color:#3057C3;'>Alternatives and why Finexer</h2>";
+  for (const comp of r.alternatives || []) {
+    html += "<h3>" + esc(comp.name) + " (" + comp.clients.length + " clients)</h3>";
+    for (const cl of comp.clients) {
+      html += "<p style='margin-bottom:2px;'><b>" + esc(cl.label) + "</b> <span style='color:#56617A;'>[" + esc(cl.relationship) + ", " + esc(cl.status) + (cl.manual ? "" : " guess") + "]</span>";
+      if (cl.why_alternative) html += "<br/>Why the alternative: " + esc(cl.why_alternative);
+      if (cl.why_finexer) html += "<br/><span style='color:#004AAD;'>Why Finexer: " + esc(cl.why_finexer) + "</span>";
+      html += "</p>";
+    }
+  }
+  html += "<h2 style='color:#3057C3;'>Industries</h2><ul>";
+  for (const ind of r.industries || []) {
+    html += "<li><b>" + esc(ind.name) + "</b> (" + ind.count + "): top issues " + esc(ind.top_issues.join("; ") || "none") + ". Clients: " + esc(ind.clients.join(", ")) + "</li>";
+  }
+  html += "</ul></body></html>";
   return html;
 }
 
-function compToCsv(report) {
+function intelToCsv(r) {
   const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
-  const rows = [["Competitor", "Client", "Relationship", "Why", "Pain points"]];
-  for (const comp of report.competitors) {
-    for (const cl of comp.clients) {
-      rows.push([comp.name, cl.client, cl.relationship, cl.why || "", (cl.pain_points || []).join("; ")]);
+  const rows = [["Section", "Group", "Client", "Status", "Relationship", "Detail"]];
+  for (const t of r.issues || []) {
+    for (const c of t.clients) {
+      rows.push(["Issue", t.theme, c.label, c.status + (c.manual ? "" : " (guess)"), "", (t.examples || []).join(" | ")]);
     }
   }
-  return rows.map((r) => r.map(q).join(",")).join("\r\n");
+  for (const comp of r.alternatives || []) {
+    for (const cl of comp.clients) {
+      rows.push([
+        "Alternative", comp.name, cl.label, cl.status + (cl.manual ? "" : " (guess)"), cl.relationship,
+        (cl.why_alternative ? "Why alternative: " + cl.why_alternative + ". " : "") +
+        (cl.why_finexer ? "Why Finexer: " + cl.why_finexer : ""),
+      ]);
+    }
+  }
+  for (const ind of r.industries || []) {
+    rows.push(["Industry", ind.name, ind.clients.join("; "), "", "", "Top issues: " + (ind.top_issues.join("; ") || "none")]);
+  }
+  for (const p of r.products || []) {
+    rows.push(["Product interest", p.name, "", "", "", String(p.count) + " calls"]);
+  }
+  return rows.map((row) => row.map(q).join(",")).join("\r\n");
 }
 
-function CompetitorsPanel({ api, showNotice, canEdit }) {
+function IntelligencePanel({ api, showNotice, canEdit, onOpenCall }) {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [copiedComp, setCopiedComp] = useState(false);
+  const [copiedIntel, setCopiedIntel] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const d = await api("/.netlify/functions/competitors");
+        const d = await api("/.netlify/functions/intelligence");
         if (d && d.report) setReport(d.report);
       } catch (e) {
         if (e.status !== 401) showNotice(e.message);
@@ -1175,28 +1242,44 @@ function CompetitorsPanel({ api, showNotice, canEdit }) {
   const generate = async () => {
     setBusy(true);
     try {
-      const d = await api("/.netlify/functions/competitors", {
+      const d = await api("/.netlify/functions/intelligence", {
         method: "POST",
         body: { action: "generate" },
       });
       setReport(d.report);
-      showNotice("Report generated and saved. The whole team now sees this version.");
+      const r = d.report;
+      const bits = [];
+      if (r.analyzedNow) bits.push(r.analyzedNow + " new call" + (r.analyzedNow > 1 ? "s" : "") + " analysed.");
+      if (r.fromCache) bits.push(r.fromCache + " served from cache, no AI cost.");
+      if (r.pendingNew) bits.push(r.pendingNew + " more new call" + (r.pendingNew > 1 ? "s" : "") + " left. Click Update report again to include them.");
+      showNotice(bits.length ? bits.join(" ") : "Report is up to date. Nothing new to analyse, no AI calls used.");
     } catch (e) {
       showNotice(e.message);
     }
     setBusy(false);
   };
 
+  const Chip = ({ children, bg, fg, border }) => (
+    <span style={{
+      fontFamily: F.mono, fontSize: 11, fontWeight: 500, color: fg, background: bg,
+      borderRadius: 999, padding: "3px 10px", border: border || "none", whiteSpace: "nowrap",
+    }}>
+      {children}
+    </span>
+  );
+
+  const maxProduct = report ? Math.max(1, ...(report.products || []).map((p) => p.count)) : 1;
+
   return (
     <div>
       <h2 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px" }}>
-        Competitor switchers
+        Sales Intelligence
       </h2>
       <p style={{ fontSize: 13.5, color: C.muted, margin: "0 0 16px", lineHeight: 1.55 }}>
-        Clients from decoded calls who mentioned a competitor, grouped by
-        competitor, with whether they are switching from it, evaluating it, or
-        just using it, plus their reasons and pain points. Generated once, saved,
-        and shared with the whole team.
+        What clients keep struggling with, which alternatives they come from and
+        why Finexer wins, which industries they belong to, and where each deal
+        stands. Built from decoded calls and cached: updating only analyses NEW
+        calls, everything already analysed costs no AI calls.
       </p>
 
       <div className="flex items-center gap-2 mb-5" style={{ flexWrap: "wrap" }}>
@@ -1207,8 +1290,8 @@ function CompetitorsPanel({ api, showNotice, canEdit }) {
             disabled={busy}
             onClick={generate}
           >
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <Repeat size={14} />}
-            {report ? "Regenerate report" : "Generate report"}
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <BarChart3 size={14} />}
+            {report ? "Update report" : "Generate report"}
           </button>
         )}
         {report && (
@@ -1217,11 +1300,7 @@ function CompetitorsPanel({ api, showNotice, canEdit }) {
               className="fcd-btn flex items-center gap-2"
               style={btnGhost}
               onClick={() =>
-                downloadBlob(
-                  compToWordHtml(report),
-                  "application/msword",
-                  "Finexer-Competitor-Switchers.doc"
-                )
+                downloadBlob(intelToWordHtml(report), "application/msword", "Finexer-Sales-Intelligence.doc")
               }
             >
               <Download size={13} /> Word
@@ -1230,7 +1309,7 @@ function CompetitorsPanel({ api, showNotice, canEdit }) {
               className="fcd-btn flex items-center gap-2"
               style={btnGhost}
               onClick={() =>
-                downloadBlob(compToCsv(report), "text/csv;charset=utf-8", "Finexer-Competitor-Switchers.csv")
+                downloadBlob(intelToCsv(report), "text/csv;charset=utf-8", "Finexer-Sales-Intelligence.csv")
               }
             >
               <Download size={13} /> Excel (CSV)
@@ -1239,13 +1318,13 @@ function CompetitorsPanel({ api, showNotice, canEdit }) {
               className="fcd-btn flex items-center gap-2"
               style={btnGhost}
               onClick={async () => {
-                const ok = await copyToClipboard(compToText(report));
-                if (ok) { setCopiedComp(true); setTimeout(() => setCopiedComp(false), 2000); }
+                const ok = await copyToClipboard(intelToText(report));
+                if (ok) { setCopiedIntel(true); setTimeout(() => setCopiedIntel(false), 2000); }
                 else showNotice("Copy failed in this browser.");
               }}
             >
-              {copiedComp ? <Check size={13} /> : <Copy size={13} />}
-              {copiedComp ? "Copied" : "Copy"}
+              {copiedIntel ? <Check size={13} /> : <Copy size={13} />}
+              {copiedIntel ? "Copied" : "Copy"}
             </button>
           </>
         )}
@@ -1254,35 +1333,129 @@ function CompetitorsPanel({ api, showNotice, canEdit }) {
       {(loading || (busy && !report)) && (
         <div className="flex items-center gap-2" style={{ color: C.muted, fontSize: 13.5 }}>
           <Loader2 size={14} className="animate-spin" />
-          {loading
-            ? "Loading the saved report"
-            : "Reading competitor mentions across all decoded calls, this takes a few seconds"}
+          {loading ? "Loading the saved report" : "Analysing new calls, this takes a few seconds"}
         </div>
       )}
 
       {!loading && !busy && !report && (
         <div className="rounded-xl text-center"
           style={{ border: "1px dashed #C3CBDC", background: C.surface, padding: "36px 24px" }}>
-          <Repeat size={24} style={{ color: C.faint, margin: "0 auto 10px", display: "block" }} />
+          <BarChart3 size={24} style={{ color: C.faint, margin: "0 auto 10px", display: "block" }} />
           <p style={{ margin: 0, fontSize: 13.5, color: C.muted, lineHeight: 1.6 }}>
             {canEdit
-              ? "No report generated yet. Click Generate report once, it will be saved for the whole team."
-              : "No report generated yet. Ask a writer or admin to generate it."}
+              ? "No report yet. Click Generate report once, it will be saved for the whole team."
+              : "No report yet. Ask a writer or admin to generate it."}
           </p>
         </div>
       )}
 
       {report && (
         <div className="flex flex-col gap-4">
-          <div style={{ fontFamily: F.mono, fontSize: 11.5, color: C.faint }}>
-            Built from {report.totalCalls} calls mentioning a competitor &#183; generated {fmtDate(report.generatedAt)}
+          <div style={{ fontFamily: F.mono, fontSize: 11.5, color: C.faint, lineHeight: 1.6 }}>
+            Built from {report.totalCalls} decoded calls &#183; {report.analyzedCalls} analysed
+            &#183; updated {fmtDate(report.generatedAt)}
+            {report.provider === "groq" ? " · last batch via Groq fallback" : ""}
           </div>
-          {report.competitors.length === 0 && (
-            <p style={{ fontSize: 13.5, color: C.muted }}>
-              No competitor relationships found in the decoded calls yet.
+
+          {report.pendingNew > 0 && canEdit && (
+            <div className="rounded-xl p-4 flex items-center gap-2"
+              style={{ background: C.amberSoft, border: "1px solid #EAD9B8", color: C.amber, fontSize: 13 }}>
+              <AlertTriangle size={14} />
+              {report.pendingNew} new call{report.pendingNew > 1 ? "s are" : " is"} not in this report yet.
+              Click Update report again to include {report.pendingNew > 1 ? "them" : "it"}.
+            </div>
+          )}
+
+          {/* overview */}
+          <SectionCard icon={BarChart3} title="Overview">
+            <div className="flex gap-2 mb-4" style={{ flexWrap: "wrap" }}>
+              {Object.entries(report.statusCounts || {}).map(([k, n]) => {
+                const base = k.replace(" (guess)", "");
+                const s = DEAL_STYLE[base] || DEAL_STYLE.open;
+                return (
+                  <Chip key={k} bg={s.bg} fg={s.fg}
+                    border={k.includes("(guess)") ? "1px dashed " + s.fg + "66" : "1px solid " + s.fg + "33"}>
+                    {k}: {n}
+                  </Chip>
+                );
+              })}
+            </div>
+            <div style={{ fontFamily: F.mono, fontSize: 11, color: C.faint, marginBottom: 6 }}>
+              PRODUCT INTEREST ACROSS CALLS
+            </div>
+            <div className="flex flex-col gap-2">
+              {(report.products || []).map((p) => (
+                <div key={p.name} className="flex items-center gap-2">
+                  <span style={{ fontSize: 12.5, color: C.ink, width: 165, flexShrink: 0 }}>{p.name}</span>
+                  <div style={{ flex: 1, height: 8, borderRadius: 999, background: "#E8ECF4", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: Math.round((p.count / maxProduct) * 100) + "%", background: GRAD, borderRadius: 999 }} />
+                  </div>
+                  <span style={{ fontFamily: F.mono, fontSize: 11.5, color: C.muted, width: 26, textAlign: "right" }}>{p.count}</span>
+                </div>
+              ))}
+            </div>
+            <p style={{ margin: "12px 0 0", fontSize: 11.5, color: C.faint, lineHeight: 1.6 }}>
+              Statuses with a dashed border and &ldquo;?&rdquo; are guessed from the call
+              (buying signals, next steps, objections). Set the real status on any
+              call page and it overrides the guess everywhere.
+            </p>
+          </SectionCard>
+
+          {/* top issues */}
+          <SectionCard icon={AlertTriangle} title={"Top issues clients talk about (" + (report.issues || []).length + ")"}>
+            {(report.issues || []).length === 0 && (
+              <p style={{ fontSize: 13.5, color: C.muted, margin: 0 }}>No issue themes yet.</p>
+            )}
+            <div className="flex flex-col">
+              {(report.issues || []).map((t, ti) => (
+                <div key={ti} style={{ padding: "12px 0", borderTop: ti ? "1px solid " + C.line : "none" }}>
+                  <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+                    <span style={{
+                      fontFamily: F.mono, fontSize: 11, fontWeight: 600, color: C.accent,
+                      background: C.accentSoft, border: "1px solid " + C.accentLine,
+                      borderRadius: 6, padding: "2px 7px", flexShrink: 0,
+                    }}>
+                      {t.count}
+                    </span>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: C.ink }}>{t.theme}</span>
+                  </div>
+                  <div className="flex gap-2 mt-2" style={{ flexWrap: "wrap" }}>
+                    {t.clients.map((c, ci) => (
+                      <button
+                        key={ci}
+                        className="fcd-btn flex items-center gap-1"
+                        onClick={() => onOpenCall && onOpenCall(c.id)}
+                        title="Open this call"
+                        style={{
+                          background: C.surface, border: "1px solid " + C.line, borderRadius: 999,
+                          padding: "3px 4px 3px 10px", fontSize: 12, color: C.ink, cursor: "pointer",
+                        }}
+                      >
+                        {c.label}
+                        <DealChip status={c.status} manual={c.manual} />
+                      </button>
+                    ))}
+                  </div>
+                  {t.examples && t.examples.length > 0 && (
+                    <p style={{ margin: "7px 0 0", fontSize: 12.5, color: C.muted, fontStyle: "italic", lineHeight: 1.55 }}>
+                      e.g. {t.examples.join(" · ")}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+
+          {/* alternatives */}
+          <div style={{ fontFamily: F.mono, fontSize: 11, letterSpacing: "0.12em", color: C.accent, fontWeight: 600, marginTop: 6 }}>
+            ALTERNATIVES AND WHY FINEXER
+          </div>
+          {(report.alternatives || []).length === 0 && (
+            <p style={{ fontSize: 13.5, color: C.muted, margin: 0 }}>
+              No competitor or alternative providers mentioned in the decoded calls yet.
             </p>
           )}
-          {report.competitors.map((comp, ci) => (
+          {(report.alternatives || []).map((comp, ci) => (
             <SectionCard key={ci} icon={Repeat} title={comp.name + " (" + comp.clients.length + ")"}>
               <div className="flex flex-col">
                 {comp.clients.map((cl, li) => {
@@ -1290,28 +1463,34 @@ function CompetitorsPanel({ api, showNotice, canEdit }) {
                   return (
                     <div key={li} style={{ padding: "10px 0", borderTop: li ? "1px solid " + C.line : "none" }}>
                       <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 14, fontWeight: 600, color: C.ink }}>{cl.client}</span>
+                        <button
+                          className="fcd-btn"
+                          onClick={() => onOpenCall && onOpenCall(cl.id)}
+                          title="Open this call"
+                          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 14, fontWeight: 600, color: C.ink }}
+                        >
+                          {cl.label}
+                        </button>
                         <span style={{
                           fontFamily: F.mono, fontSize: 10.5, fontWeight: 500,
                           color: rs.fg, background: rs.bg, borderRadius: 999, padding: "2px 8px",
                         }}>
                           {cl.relationship}
                         </span>
+                        <DealChip status={cl.status} manual={cl.manual} />
+                        <span style={{ fontFamily: F.mono, fontSize: 10.5, color: C.faint }}>{cl.industry}</span>
                       </div>
-                      {cl.why && (
-                        <p style={{ margin: "4px 0 0", fontSize: 13.5, lineHeight: 1.55, color: C.ink }}>
-                          {cl.why}
+                      {cl.why_alternative && (
+                        <p style={{ margin: "5px 0 0", fontSize: 13, lineHeight: 1.55, color: C.ink }}>
+                          <span style={{ fontFamily: F.mono, fontSize: 10.5, color: C.faint }}>WHY THE ALTERNATIVE </span>
+                          {cl.why_alternative}
                         </p>
                       )}
-                      {cl.pain_points && cl.pain_points.length > 0 && (
-                        <ul className="m-0 p-0" style={{ listStyle: "none", marginTop: 5 }}>
-                          {cl.pain_points.map((p, pi) => (
-                            <li key={pi} className="flex gap-2" style={{ fontSize: 12.5, lineHeight: 1.5, color: C.muted, padding: "1px 0" }}>
-                              <span style={{ color: C.accent, flexShrink: 0 }}>&#8226;</span>
-                              <span>{p}</span>
-                            </li>
-                          ))}
-                        </ul>
+                      {cl.why_finexer && (
+                        <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.55, color: C.accentDark, fontWeight: 500 }}>
+                          <span style={{ fontFamily: F.mono, fontSize: 10.5, color: C.accent }}>WHY FINEXER </span>
+                          {cl.why_finexer}
+                        </p>
                       )}
                     </div>
                   );
@@ -1319,6 +1498,35 @@ function CompetitorsPanel({ api, showNotice, canEdit }) {
               </div>
             </SectionCard>
           ))}
+
+          {/* industries */}
+          <SectionCard icon={Building2} title="Industries on these calls">
+            <div className="flex flex-col">
+              {(report.industries || []).map((ind, ii) => (
+                <div key={ii} className="flex items-start gap-3"
+                  style={{ padding: "9px 0", borderTop: ii ? "1px solid " + C.line : "none" }}>
+                  <span style={{
+                    fontFamily: F.mono, fontSize: 11, fontWeight: 600, color: C.accent,
+                    background: C.accentSoft, border: "1px solid " + C.accentLine,
+                    borderRadius: 6, padding: "2px 7px", flexShrink: 0, marginTop: 1,
+                  }}>
+                    {ind.count}
+                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>{ind.name}</div>
+                    {ind.top_issues.length > 0 && (
+                      <div style={{ fontSize: 12.5, color: C.muted, marginTop: 2, lineHeight: 1.5 }}>
+                        Top issues: {ind.top_issues.join(" · ")}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 11.5, color: C.faint, marginTop: 2, lineHeight: 1.5 }}>
+                      {ind.clients.join(", ")}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
         </div>
       )}
     </div>
@@ -1340,9 +1548,7 @@ export default function App() {
   const [detailCache, setDetailCache] = useState({});
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
-  const [adminOpen, setAdminOpen] = useState(false);
-  const [faqOpen, setFaqOpen] = useState(false);
-  const [compOpen, setCompOpen] = useState(false);
+  const [view, setView] = useState("library");
   const [passOpen, setPassOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [dragOver, setDragOver] = useState(false);
@@ -1377,7 +1583,7 @@ export default function App() {
     setCalls([]);
     setDetailCache({});
     setSelectedId(null);
-    setAdminOpen(false);
+    setView("library");
     setListLoaded(false);
     if (message) setLoginError(message);
   };
@@ -1599,6 +1805,23 @@ export default function App() {
     }
   };
 
+  const setDealStatus = async (id, status) => {
+    try {
+      const d = await api("/.netlify/functions/intelligence", {
+        method: "POST",
+        body: { action: "set_status", id, status },
+      });
+      if (d && d.call) {
+        updateLocal(id, { dealStatus: d.call.dealStatus || null });
+        setDetailCache((prev) =>
+          prev[id] ? { ...prev, [id]: { ...prev[id], dealStatus: d.call.dealStatus || null } } : prev
+        );
+      }
+    } catch (e) {
+      if (e.status !== 401) showNotice(e.message);
+    }
+  };
+
   const canDeleteCall = (c) =>
     me && (me.role === "admin" || (me.role === "writer" && c.uploadedBy === me.email));
 
@@ -1671,10 +1894,11 @@ export default function App() {
 
       {/* top bar */}
       <div style={{ background: C.surface, borderBottom: "1px solid " + C.line }}>
-        <div className="max-w-3xl mx-auto px-5 flex items-center gap-3" style={{ height: 60 }}>
+        <div style={{ height: 3, background: GRAD }} />
+        <div className="max-w-3xl mx-auto px-5 flex items-center gap-3" style={{ height: 56 }}>
           <button
             className="fcd-btn flex items-center gap-2"
-            onClick={() => { setSelectedId(null); setAdminOpen(false); setFaqOpen(false); setCompOpen(false); }}
+            onClick={() => { setView("library"); setSelectedId(null); }}
             style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
           >
             <Logo size={26} />
@@ -1687,29 +1911,6 @@ export default function App() {
             {me.name || me.email}
           </span>
           <RoleBadge role={me.role} />
-          <button
-            className="fcd-btn flex items-center gap-1"
-            style={{ ...btnGhost, padding: "6px 10px", fontSize: 12.5, ...(faqOpen ? { borderColor: C.accent, color: C.accent } : {}) }}
-            onClick={() => { setFaqOpen((v) => !v); setCompOpen(false); setAdminOpen(false); setSelectedId(null); }}
-          >
-            <BookOpen size={13} /> FAQ
-          </button>
-          <button
-            className="fcd-btn flex items-center gap-1"
-            style={{ ...btnGhost, padding: "6px 10px", fontSize: 12.5, ...(compOpen ? { borderColor: C.accent, color: C.accent } : {}) }}
-            onClick={() => { setCompOpen((v) => !v); setFaqOpen(false); setAdminOpen(false); setSelectedId(null); }}
-          >
-            <Repeat size={13} /> Switchers
-          </button>
-          {me.role === "admin" && (
-            <button
-              className="fcd-btn flex items-center gap-1"
-              style={{ ...btnGhost, padding: "6px 10px", fontSize: 12.5, ...(adminOpen ? { borderColor: C.accent, color: C.accent } : {}) }}
-              onClick={() => { setAdminOpen((v) => !v); setFaqOpen(false); setCompOpen(false); setSelectedId(null); }}
-            >
-              <Users size={13} /> Team
-            </button>
-          )}
           <button
             className="fcd-btn"
             title="Change password"
@@ -1727,6 +1928,34 @@ export default function App() {
             <LogOut size={13} />
           </button>
         </div>
+        <div className="max-w-3xl mx-auto px-5 flex items-center" style={{ gap: 2, overflowX: "auto" }}>
+          {[
+            { id: "library", label: "Library", icon: Inbox },
+            { id: "faq", label: "Sales FAQ", icon: BookOpen },
+            { id: "intel", label: "Intelligence", icon: BarChart3 },
+            ...(me.role === "admin" ? [{ id: "team", label: "Team", icon: Users }] : []),
+          ].map((t) => {
+            const active = view === t.id;
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.id}
+                className="fcd-btn flex items-center gap-2"
+                onClick={() => { setView(t.id); setSelectedId(null); }}
+                style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  padding: "10px 12px", fontSize: 13, fontFamily: F.body,
+                  fontWeight: active ? 600 : 500,
+                  color: active ? C.accent : C.muted,
+                  borderBottom: "2px solid " + (active ? C.accent : "transparent"),
+                  marginBottom: -1, whiteSpace: "nowrap",
+                }}
+              >
+                <Icon size={14} /> {t.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="max-w-3xl mx-auto px-5 py-8">
@@ -1734,12 +1963,13 @@ export default function App() {
           <PasswordPanel api={api} showNotice={showNotice} onClose={() => setPassOpen(false)} />
         )}
 
-        {adminOpen ? (
+        {view === "team" && me.role === "admin" ? (
           <AdminPanel api={api} me={me} showNotice={showNotice} />
-        ) : faqOpen ? (
+        ) : view === "faq" ? (
           <FaqPanel api={api} showNotice={showNotice} canEdit={canEdit} />
-        ) : compOpen ? (
-          <CompetitorsPanel api={api} showNotice={showNotice} canEdit={canEdit} />
+        ) : view === "intel" ? (
+          <IntelligencePanel api={api} showNotice={showNotice} canEdit={canEdit}
+            onOpenCall={(id) => { setView("library"); setSelectedId(id); }} />
         ) : selectedLight ? (
           /* ======================= DETAIL VIEW ======================= */
           <div>
@@ -1788,6 +2018,32 @@ export default function App() {
                   {insights.client_type}
                 </span>
               )}
+
+              <div className="flex items-center gap-2 mt-3" style={{ flexWrap: "wrap" }}>
+                {canEdit ? (
+                  <label className="flex items-center gap-2" style={{ fontFamily: F.mono, fontSize: 11, color: C.faint }}>
+                    DEAL STATUS
+                    <select
+                      className="fcd-input"
+                      value={selectedLight.dealStatus || ""}
+                      onChange={(e) => setDealStatus(selectedLight.id, e.target.value)}
+                      style={{ width: "auto", padding: "5px 8px", fontSize: 12.5 }}
+                    >
+                      <option value="">not set (auto guess)</option>
+                      {DEAL_OPTIONS.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : selectedLight.dealStatus ? (
+                  <DealChip status={selectedLight.dealStatus} manual />
+                ) : null}
+                {insights && insights.decoded_by === "groq" && (
+                  <span style={{ fontFamily: F.mono, fontSize: 10.5, color: C.amber, background: C.amberSoft, borderRadius: 999, padding: "3px 9px" }}>
+                    decoded via Groq fallback
+                  </span>
+                )}
+              </div>
 
               {/* actions */}
               <div className="flex items-center gap-2 mt-5" style={{ flexWrap: "wrap" }}>
@@ -2180,6 +2436,7 @@ export default function App() {
                         </div>
                       </div>
                       <StatusChip status={c.status} />
+                      {c.dealStatus && <DealChip status={c.dealStatus} manual />}
                       {c.status === "error" && canEdit && (
                         <button
                           className="fcd-btn"

@@ -72,7 +72,7 @@ function extractJson(text) {
 
 /* ---------------- Gemini ---------------- */
 
-async function callGemini(transcript) {
+async function callGemini(prompt, maxOutputTokens = 8192) {
   const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
   const url =
     "https://generativelanguage.googleapis.com/v1beta/models/" +
@@ -82,11 +82,11 @@ async function callGemini(transcript) {
 
   const makeBody = (withThinking) =>
     JSON.stringify({
-      contents: [{ parts: [{ text: buildPrompt(transcript, GEMINI_CLIP) }] }],
+      contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         responseMimeType: "application/json",
         temperature: 0.2,
-        maxOutputTokens: 8192,
+        maxOutputTokens,
         ...(withThinking ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
       },
     });
@@ -152,7 +152,7 @@ function geminiMsg(txt, status) {
 
 /* ---------------- Groq ---------------- */
 
-async function callGroq(transcript) {
+async function callGroq(prompt, maxTokens = 4000) {
   const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
   let res;
   try {
@@ -164,9 +164,9 @@ async function callGroq(transcript) {
       },
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: buildPrompt(transcript, GROQ_CLIP) }],
+        messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
-        max_tokens: 4000,
+        max_tokens: maxTokens,
         response_format: { type: "json_object" },
       }),
     });
@@ -193,14 +193,15 @@ async function callGroq(transcript) {
   return extractJson(text);
 }
 
-/* ---------------- Combined decode with fallback ----------------
+/* ---------------- Generic JSON generation with fallback ----------------
    Tries Gemini first (2 attempts). Falls back to Groq when Gemini is
    overloaded / rate limited / unreachable, or when GEMINI_API_KEY is
    missing but GROQ_API_KEY exists.
-   Returns normalized insights with a decoded_by field ("gemini"/"groq").
-   Throws errors carrying { retryable } so callers can requeue. */
+   Returns { raw, provider }. Throws errors carrying { retryable } so
+   callers can requeue or tell the user to retry. groqPrompt lets callers
+   pass a shorter prompt for Groq's tighter free tier token limits. */
 
-export async function decodeTranscript(transcript) {
+export async function generateJson(prompt, { maxOutputTokens = 8192, groqPrompt = null } = {}) {
   const hasGemini = Boolean(process.env.GEMINI_API_KEY);
   const hasGroq = Boolean(process.env.GROQ_API_KEY);
 
@@ -217,10 +218,8 @@ export async function decodeTranscript(transcript) {
   if (hasGemini) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const raw = await callGemini(transcript);
-        const insights = normalizeInsights(raw);
-        insights.decoded_by = "gemini";
-        return insights;
+        const raw = await callGemini(prompt, maxOutputTokens);
+        return { raw, provider: "gemini" };
       } catch (e) {
         geminiErr = e;
         if (!e.retryable && !e.overloaded) break;
@@ -234,10 +233,8 @@ export async function decodeTranscript(transcript) {
 
   if (shouldFallback) {
     try {
-      const raw = await callGroq(transcript);
-      const insights = normalizeInsights(raw);
-      insights.decoded_by = "groq";
-      return insights;
+      const raw = await callGroq(groqPrompt || prompt, Math.min(maxOutputTokens, 4000));
+      return { raw, provider: "groq" };
     } catch (groqErr) {
       const msg = geminiErr
         ? geminiErr.message + " Fallback failed too. " + groqErr.message
@@ -248,5 +245,18 @@ export async function decodeTranscript(transcript) {
     }
   }
 
-  throw geminiErr || Object.assign(new Error("Decode failed."), { retryable: true });
+  throw geminiErr || Object.assign(new Error("Generation failed."), { retryable: true });
+}
+
+/* ---------------- Transcript decode ----------------
+   Returns normalized insights with a decoded_by field ("gemini"/"groq"). */
+
+export async function decodeTranscript(transcript) {
+  const { raw, provider } = await generateJson(buildPrompt(transcript, GEMINI_CLIP), {
+    maxOutputTokens: 8192,
+    groqPrompt: buildPrompt(transcript, GROQ_CLIP),
+  });
+  const insights = normalizeInsights(raw);
+  insights.decoded_by = provider;
+  return insights;
 }

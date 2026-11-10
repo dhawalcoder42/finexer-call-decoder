@@ -214,6 +214,7 @@ export function rowToCall(row) {
     uploadedAt: row.uploaded_at || null,
     processedAt: row.processed_at || null,
     processingAt: row.processing_at || null,
+    dealStatus: row.deal_status || null,
   };
 }
 
@@ -229,6 +230,7 @@ export function callToRow(call) {
     uploaded_at: call.uploadedAt || null,
     processed_at: call.processedAt || null,
     processing_at: call.processingAt || null,
+    deal_status: call.dealStatus || null,
   };
 }
 
@@ -242,6 +244,7 @@ export function lightEntry(call) {
     uploadedAt: call.uploadedAt || null,
     processedAt: call.processedAt || null,
     errorMsg: call.errorMsg || null,
+    dealStatus: call.dealStatus || null,
     client_name: i.client_name || null,
     company_or_project: i.company_or_project || null,
     one_liner: i.one_liner || null,
