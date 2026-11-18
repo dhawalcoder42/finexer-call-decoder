@@ -195,6 +195,17 @@ export function displaySubtitle(call) {
   return co;
 }
 
+/** Up to two initials for the row avatar, taken from the resolved name. */
+export function initialsOf(name) {
+  const words = String(name || "")
+    .split(/[\s._-]+/)
+    .filter((w) => /[\p{L}\p{N}]/u.test(w));
+  if (!words.length) return "?";
+  const first = words[0][0];
+  const second = words.length > 1 ? words[words.length - 1][0] : "";
+  return (first + second).toLocaleUpperCase();
+}
+
 const SEEN_KEY = "fcd-last-seen-v1";
 
 function loadLastSeen() {
@@ -2638,7 +2649,6 @@ export default function App() {
                   </div>
                 )}
                 {visible.map((c, vi) => {
-                  const idx = calls.indexOf(c);
                   const prev = vi > 0 ? visible[vi - 1] : null;
                   const showDay =
                     !prev || startOfDay(prev.uploadedAt || 0) !== startOfDay(c.uploadedAt || 0);
@@ -2675,22 +2685,33 @@ export default function App() {
                         cursor: "pointer",
                       }}
                     >
-                      <span style={{
-                        fontFamily: F.mono, fontSize: 12,
-                        color: c.status === "done" ? C.accent : C.faint,
-                        fontWeight: 500, flexShrink: 0, width: 26,
-                      }}>
-                        {String(idx + 1).padStart(2, "0")}
+                      <span
+                        aria-hidden="true"
+                        style={{
+                          width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontFamily: F.mono, fontSize: 12, fontWeight: 600, letterSpacing: "0.02em",
+                          color: c.status === "done" ? "#fff" : C.muted,
+                          background: c.status === "done" ? GRAD : "#EDF0F6",
+                          border: c.status === "done" ? "none" : "1px solid " + C.line,
+                        }}
+                      >
+                        {initialsOf(displayName(c))}
                       </span>
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{
-                          fontSize: 14.5, fontWeight: 600,
-                          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                        }}>
-                          {displayName(c)}
+                        <div className="flex items-baseline gap-2" style={{ minWidth: 0 }}>
+                          <span style={{
+                            fontSize: 15, fontWeight: 600, color: C.ink,
+                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                          }}>
+                            {displayName(c)}
+                          </span>
                           {displaySubtitle(c) && (
-                            <span style={{ fontWeight: 500, color: C.muted, fontSize: 13 }}>
-                              {" · " + displaySubtitle(c)}
+                            <span style={{
+                              fontSize: 12.5, color: C.muted, flexShrink: 1, minWidth: 0,
+                              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                            }}>
+                              {displaySubtitle(c)}
                             </span>
                           )}
                         </div>
