@@ -43,13 +43,44 @@ const deDash = (s) => String(s || "").replace(/—/g, "-").replace(/–/g, "-").
 
 /* ---------------- pure helpers (exported for tests) ---------------- */
 
+/* Client names come from two unreliable sources: the AI reads the name off
+   the call and sometimes only catches a first name, while the filename
+   carries the fuller name but is often all lowercase. Combining them keeps
+   the Intelligence report naming calls the same way the library does. */
+
+const titleCase = (s) =>
+  s.replace(/\b[\p{L}][\p{L}'’-]*/gu, (w) => w[0].toLocaleUpperCase() + w.slice(1));
+
+export function nameFromFilename(filename) {
+  if (!filename) return "";
+  let s = String(filename)
+    .replace(/\.(txt|md|docx?|pdf)$/i, "")
+    .replace(/[_-]?transcript$/i, "")
+    .replace(/\s*\(\d+\)$/, "")
+    .trim();
+  s = s.replace(
+    /^(intro|discovery|demo|sales|catch[\s-]?up|follow[\s-]?up)\s+call\s*[-–—:]\s*/i,
+    ""
+  );
+  s = s.replace(/^call\s*[-–—:]\s*/i, "").trim();
+  if (!s) return "";
+  if (s === s.toLocaleLowerCase() || s === s.toLocaleUpperCase()) s = titleCase(s);
+  return s;
+}
+
 export function callLabel(row) {
   const i = row.insights || {};
-  return (
-    i.client_name ||
-    i.company_or_project ||
-    String(row.filename || "").replace(/\.txt$/i, "")
-  );
+  const fromFile = nameFromFilename(row.filename);
+  const fromAi = String(i.client_name || "").trim();
+
+  if (!fromAi) return fromFile || i.company_or_project || "Untitled call";
+  if (!fromFile) return fromAi;
+
+  const a = fromAi.toLocaleLowerCase();
+  const b = fromFile.toLocaleLowerCase();
+  if (b.includes(a)) return fromFile;
+  if (a.includes(b)) return fromAi;
+  return fromAi;
 }
 
 // Zero-AI status guess from what the client actually said on the call.

@@ -129,6 +129,72 @@ const fmtTime = (ts) => {
   }
 };
 
+/* ------------------------------------------------------------------ */
+/* Client names                                                        */
+/*                                                                     */
+/* Two sources, each unreliable on its own. The AI reads the name off  */
+/* the call, so it sometimes only catches a first name ("Bryan"). The  */
+/* filename carries whatever Otter was told the meeting was called,    */
+/* which is usually the full name but often lowercase                  */
+/* ("intro call - carl jones.txt"). Combining them gives one clean     */
+/* name per call instead of the ragged mix the library used to show.   */
+
+const titleCase = (s) =>
+  s.replace(/\b[\p{L}][\p{L}'’-]*/gu, (w) =>
+    w[0].toLocaleUpperCase() + w.slice(1)
+  );
+
+/** Strip Otter's wrapping off a transcript filename: the "Intro Call - "
+ *  prefix, the "_transcript" suffix, the extension, and any " (2)" copy
+ *  marker. Returns "" when nothing usable is left. */
+export function nameFromFilename(filename) {
+  if (!filename) return "";
+  let s = String(filename)
+    .replace(/\.(txt|md|docx?|pdf)$/i, "")
+    .replace(/[_-]?transcript$/i, "")
+    .replace(/\s*\(\d+\)$/, "")
+    .trim();
+  s = s.replace(/^(intro|discovery|demo|sales|catch[\s-]?up|follow[\s-]?up)\s+call\s*[-–—:]\s*/i, "");
+  s = s.replace(/^call\s*[-–—:]\s*/i, "").trim();
+  if (!s) return "";
+  // Only fix casing when the name arrived all lower or all upper, so names
+  // that are already cased properly (McKenzie, MTD) are left alone.
+  if (s === s.toLocaleLowerCase() || s === s.toLocaleUpperCase()) s = titleCase(s);
+  return s;
+}
+
+/** The name to show for a call. Prefers whichever of the two sources is
+ *  more complete when they describe the same person. */
+export function displayName(call) {
+  if (!call) return "Untitled call";
+  const fromFile = nameFromFilename(call.filename);
+  const fromAi = (call.client_name || "").trim();
+
+  if (!fromAi) return fromFile || call.filename || "Untitled call";
+  if (!fromFile) return fromAi;
+
+  const a = fromAi.toLocaleLowerCase();
+  const b = fromFile.toLocaleLowerCase();
+  // "Bryan" inside "Bryan Peppin": keep the fuller one.
+  if (b.includes(a)) return fromFile;
+  if (a.includes(b)) return fromAi;
+  // Genuinely different: the AI actually read the call, so trust it, and
+  // the filename still shows underneath as the secondary line.
+  return fromAi;
+}
+
+/** Company or project to show under the name, when it adds something the
+ *  name does not already say. */
+export function displaySubtitle(call) {
+  if (!call) return "";
+  const co = (call.company_or_project || "").trim();
+  if (!co) return "";
+  const name = displayName(call).toLocaleLowerCase();
+  const c = co.toLocaleLowerCase();
+  if (c === name || name.includes(c) || c.includes(name)) return "";
+  return co;
+}
+
 const SEEN_KEY = "fcd-last-seen-v1";
 
 function loadLastSeen() {
@@ -1990,7 +2056,7 @@ export default function App() {
   const q = query.trim().toLowerCase();
   const visible = q
     ? calls.filter((c) =>
-        [c.filename, c.client_name, c.company_or_project, c.one_liner]
+        [c.filename, displayName(c), c.client_name, c.company_or_project, c.one_liner]
           .filter(Boolean)
           .some((s) => s.toLowerCase().includes(q))
       )
@@ -2167,11 +2233,11 @@ export default function App() {
                 )}
               </div>
               <h1 style={{ fontFamily: F.display, fontSize: 26, fontWeight: 700, margin: "0 0 4px", lineHeight: 1.2 }}>
-                {selectedLight.client_name || selectedLight.filename.replace(/\.txt$/i, "")}
+                {displayName(selectedLight)}
               </h1>
-              {selectedLight.company_or_project && (
+              {displaySubtitle(selectedLight) && (
                 <div style={{ fontSize: 14, color: C.muted, marginBottom: 6 }}>
-                  {selectedLight.company_or_project}
+                  {displaySubtitle(selectedLight)}
                 </div>
               )}
               {insights && insights.client_type && (
@@ -2621,7 +2687,12 @@ export default function App() {
                           fontSize: 14.5, fontWeight: 600,
                           whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                         }}>
-                          {c.client_name || c.company_or_project || c.filename}
+                          {displayName(c)}
+                          {displaySubtitle(c) && (
+                            <span style={{ fontWeight: 500, color: C.muted, fontSize: 13 }}>
+                              {" · " + displaySubtitle(c)}
+                            </span>
+                          )}
                         </div>
                         <div style={{
                           fontSize: 12.5, color: C.muted,
@@ -2631,6 +2702,10 @@ export default function App() {
                             ? c.one_liner
                             : c.status === "error"
                             ? c.errorMsg || "Analysis failed"
+                            : c.status === "processing"
+                            ? "Decoding now"
+                            : c.status === "queued"
+                            ? "Queued for decoding"
                             : c.filename}
                         </div>
                       </div>
