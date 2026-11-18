@@ -46,7 +46,16 @@ var FIRST_RUN_LOOKBACK_DAYS = 7;
 
 /* --------------------------- main watcher --------------------------- */
 
+/** Apps Script kills a run at six minutes. Stop before that and save, so a
+ *  big folder is worked through across runs instead of restarting forever. */
+var TIME_BUDGET_MS = 4.5 * 60 * 1000;
+
+/** Write the seen list to disk every this many files, so a run that is cut
+ *  short still keeps its progress. */
+var SAVE_EVERY = 20;
+
 function checkForNewTranscripts() {
+  var started = Date.now();
   var props = PropertiesService.getScriptProperties();
   var seen = JSON.parse(props.getProperty('seenFileIds') || '[]');
   var seenSet = {};
@@ -60,8 +69,22 @@ function checkForNewTranscripts() {
   var sent = 0;
   var skipped = 0;
   var failed = 0;
+  var sinceSave = 0;
+  var ranOutOfTime = false;
+
+  function persist(markInitialised) {
+    if (seen.length > 2000) seen = seen.slice(seen.length - 2000);
+    props.setProperty('seenFileIds', JSON.stringify(seen));
+    if (markInitialised) props.setProperty('initialised', 'yes');
+    sinceSave = 0;
+  }
 
   while (files.hasNext()) {
+    if (Date.now() - started > TIME_BUDGET_MS) {
+      ranOutOfTime = true;
+      break;
+    }
+
     var file = files.next();
     var id = file.getId();
     var name = file.getName();
@@ -137,15 +160,20 @@ function checkForNewTranscripts() {
       Logger.log('Ingest threw for ' + cleanName + ': ' + sendErr);
       failed++;
     }
+
+    sinceSave++;
+    if (sinceSave >= SAVE_EVERY) persist(false);
   }
 
-  // Keep the seen list from growing without bound.
-  if (seen.length > 500) seen = seen.slice(seen.length - 500);
-  props.setProperty('seenFileIds', JSON.stringify(seen));
-  props.setProperty('initialised', 'yes');
+  // Only call the first pass finished once the folder was walked to the end,
+  // otherwise the lookback window would be skipped on the remaining files.
+  persist(!ranOutOfTime);
   props.setProperty('lastRun', new Date().toISOString());
 
-  Logger.log('Done. sent=' + sent + ' skipped=' + skipped + ' failed=' + failed);
+  Logger.log(
+    'Done. sent=' + sent + ' skipped=' + skipped + ' failed=' + failed +
+      (ranOutOfTime ? ' (time budget reached, continuing next run)' : '')
+  );
 }
 
 /* ------------------------- setup and teardown ------------------------ */
