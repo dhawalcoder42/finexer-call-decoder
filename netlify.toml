@@ -3,7 +3,9 @@
   publish = "dist"
   functions = "netlify/functions"
 
-# Background queue processor: decodes queued calls every 10 minutes,
+# Background queue processor: decodes queued calls every 2 minutes,
 # even when nobody has the app open. Also keeps Supabase free tier awake.
+# The Drive watcher pokes this endpoint directly on ingest, so the
+# schedule is the safety net rather than the main path.
 [functions."process-queue"]
-  schedule = "*/10 * * * *"
+  schedule = "*/2 * * * *"

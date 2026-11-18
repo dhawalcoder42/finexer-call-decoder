@@ -1,19 +1,24 @@
 /* Scheduled background processor for the Finexer Call Decoder.
-   Netlify runs this every 10 minutes (schedule set in netlify.toml).
+   Netlify runs this every 2 minutes (schedule set in netlify.toml).
    It picks the oldest queued call (requeuing anything stuck in
-   "processing" for 10+ minutes first), decodes it with the shared
+   "processing" for 4+ minutes first), decodes it with the shared
    Gemini + Groq logic, and saves the result. Queued calls therefore
    get decoded even when nobody has the app open, and the regular hit
    also keeps the free Supabase project from pausing.
 
-   It processes ONE call per run on purpose: Netlify function time
-   limits are tight, and one decode fits comfortably. Six calls an
-   hour clears a normal day's uploads in the background. */
+   The Drive watcher also pokes this endpoint the moment it ingests a
+   transcript, so a new call usually decodes within seconds rather than
+   waiting for the next scheduled run.
+
+   It processes ONE call per run on purpose: a poke arrives as a normal
+   synchronous invocation with a tight time limit, and one decode fits
+   comfortably. Anything cut short goes back in the queue on the next
+   run, so nothing is lost. */
 
 import { sb } from "../lib/util.mjs";
 import { decodeTranscript } from "../lib/ai.mjs";
 
-const STUCK_MS = 10 * 60 * 1000;
+const STUCK_MS = 4 * 60 * 1000;
 
 export const handler = async () => {
   const client = sb();
