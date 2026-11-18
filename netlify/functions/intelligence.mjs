@@ -116,12 +116,19 @@ export function assembleReport(rows, cache) {
     if (!entry) continue;
     analyzed++;
 
+    const NOW = Date.now();
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+    const uploadedAt = row.uploaded_at ? new Date(row.uploaded_at).getTime() : null;
+    const isNew = uploadedAt && (NOW - uploadedAt) < THIRTY_DAYS;
     const client = {
       id: row.id,
       label: callLabel(row),
       industry: entry.industry || "Other",
+      products: entry.products || [],
       status,
       manual: Boolean(manual),
+      uploadedAt: row.uploaded_at || null,
+      isNew: Boolean(isNew),
     };
 
     for (const t of entry.themes || []) {
@@ -286,7 +293,7 @@ export const handler = async (event) => {
   /* ----- incremental generate ----- */
   const { data: rows, error: dbErr } = await client
     .from("calls")
-    .select("id, filename, insights, deal_status")
+    .select("id, filename, insights, deal_status, uploaded_at")
     .eq("status", "done");
   if (dbErr) return json(500, { error: "Database error: " + dbErr.message });
 

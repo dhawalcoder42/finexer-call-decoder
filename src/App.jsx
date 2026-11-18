@@ -188,7 +188,7 @@ function Logo({ size = 30 }) {
   if (imgOk) {
     return (
       <img
-        src="/logo.png"
+        src="https://finexer.com/content/images/logo/finexer-d.svg"
         alt="Finexer"
         style={{ height: size, display: "block" }}
         onError={() => setImgOk(false)}
@@ -1268,6 +1268,14 @@ function IntelligencePanel({ api, showNotice, canEdit, onOpenCall }) {
     </span>
   );
 
+  const NewBadge = () => (
+    <span style={{
+      fontFamily: F.mono, fontSize: 10, fontWeight: 700, color: "#0D7A3E",
+      background: "#E6F7EE", border: "1px solid #A8DFC0",
+      borderRadius: 999, padding: "1px 7px", letterSpacing: "0.04em",
+    }}>NEW</span>
+  );
+
   const maxProduct = report ? Math.max(1, ...(report.products || []).map((p) => p.count)) : 1;
 
   return (
@@ -1432,6 +1440,7 @@ function IntelligencePanel({ api, showNotice, canEdit, onOpenCall }) {
                         }}
                       >
                         {c.label}
+                        {c.isNew && <NewBadge />}
                         <DealChip status={c.status} manual={c.manual} />
                       </button>
                     ))}
@@ -1471,6 +1480,7 @@ function IntelligencePanel({ api, showNotice, canEdit, onOpenCall }) {
                         >
                           {cl.label}
                         </button>
+                        {cl.isNew && <NewBadge />}
                         <span style={{
                           fontFamily: F.mono, fontSize: 10.5, fontWeight: 500,
                           color: rs.fg, background: rs.bg, borderRadius: 999, padding: "2px 8px",
@@ -1479,6 +1489,11 @@ function IntelligencePanel({ api, showNotice, canEdit, onOpenCall }) {
                         </span>
                         <DealChip status={cl.status} manual={cl.manual} />
                         <span style={{ fontFamily: F.mono, fontSize: 10.5, color: C.faint }}>{cl.industry}</span>
+                        {(cl.products || []).length > 0 && (
+                          <span style={{ fontFamily: F.mono, fontSize: 10.5, color: C.accent, background: C.accentSoft, borderRadius: 999, padding: "2px 8px" }}>
+                            {cl.products.join(", ")}
+                          </span>
+                        )}
                       </div>
                       {cl.why_alternative && (
                         <p style={{ margin: "5px 0 0", fontSize: 13, lineHeight: 1.55, color: C.ink }}>
@@ -1498,6 +1513,68 @@ function IntelligencePanel({ api, showNotice, canEdit, onOpenCall }) {
               </div>
             </SectionCard>
           ))}
+
+          {/* ICP snapshot */}
+          {(() => {
+            const allClients = (report.issues || []).flatMap((t) => t.clients);
+            const seen = new Set();
+            const unique = allClients.filter((c) => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
+            const newClients = unique.filter((c) => c.isNew);
+            const oldClients = unique.filter((c) => !c.isNew);
+            if (!unique.length) return null;
+            return (
+              <SectionCard icon={Target} title={"ICP Snapshot (" + unique.length + " clients)"}>
+                {newClients.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.1em", color: "#0D7A3E", fontWeight: 700, marginBottom: 6 }}>
+                      NEW CLIENTS (last 30 days) · {newClients.length}
+                    </div>
+                    <div className="flex gap-2" style={{ flexWrap: "wrap" }}>
+                      {newClients.map((c, i) => (
+                        <button
+                          key={i}
+                          className="fcd-btn flex items-center gap-1"
+                          onClick={() => onOpenCall && onOpenCall(c.id)}
+                          style={{
+                            background: "#F0FAF4", border: "1px solid #A8DFC0", borderRadius: 999,
+                            padding: "4px 10px", fontSize: 12.5, color: C.ink, cursor: "pointer", fontWeight: 500,
+                          }}
+                        >
+                          {c.label}
+                          <span style={{ fontFamily: F.mono, fontSize: 10, color: C.muted }}>{c.industry}</span>
+                          <DealChip status={c.status} manual={c.manual} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {oldClients.length > 0 && (
+                  <div>
+                    <div style={{ fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.1em", color: C.faint, fontWeight: 700, marginBottom: 6 }}>
+                      EXISTING CLIENTS · {oldClients.length}
+                    </div>
+                    <div className="flex gap-2" style={{ flexWrap: "wrap" }}>
+                      {oldClients.map((c, i) => (
+                        <button
+                          key={i}
+                          className="fcd-btn flex items-center gap-1"
+                          onClick={() => onOpenCall && onOpenCall(c.id)}
+                          style={{
+                            background: C.surface, border: "1px solid " + C.line, borderRadius: 999,
+                            padding: "4px 10px", fontSize: 12.5, color: C.ink, cursor: "pointer",
+                          }}
+                        >
+                          {c.label}
+                          <span style={{ fontFamily: F.mono, fontSize: 10, color: C.muted }}>{c.industry}</span>
+                          <DealChip status={c.status} manual={c.manual} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </SectionCard>
+            );
+          })()}
 
           {/* industries */}
           <SectionCard icon={Building2} title="Industries on these calls">
