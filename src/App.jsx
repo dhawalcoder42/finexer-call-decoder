@@ -135,13 +135,13 @@ function loadLastSeen() {
   try {
     const raw = localStorage.getItem(SEEN_KEY);
     if (raw) return Number(raw);
-    // First visit in this browser: start the clock now rather than flagging
-    // the entire back catalogue as new.
-    const now = Date.now();
-    localStorage.setItem(SEEN_KEY, String(now));
-    return now;
+    // First visit in this browser: look back a day rather than flagging the
+    // entire back catalogue, so today's arrivals still stand out.
+    const baseline = Date.now() - 24 * 60 * 60 * 1000;
+    localStorage.setItem(SEEN_KEY, String(baseline));
+    return baseline;
   } catch (e) {
-    return Date.now();
+    return Date.now() - 24 * 60 * 60 * 1000;
   }
 }
 
