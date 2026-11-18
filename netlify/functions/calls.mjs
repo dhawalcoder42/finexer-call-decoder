@@ -56,7 +56,9 @@ export const handler = async (event) => {
       .select(
         "id, filename, status, insights, error_msg, uploaded_by, uploaded_at, processed_at"
       )
-      .order("uploaded_at", { ascending: true });
+      // Newest first: a transcript that landed minutes ago is what the team
+      // opens the library for, so it belongs at the top, not buried.
+      .order("uploaded_at", { ascending: false });
     if (dbErr) return json(500, { error: "Database error: " + dbErr.message });
 
     const calls = (data || []).map((row) =>

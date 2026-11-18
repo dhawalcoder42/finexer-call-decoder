@@ -90,6 +90,69 @@ const fmtDate = (ts) => {
   }
 };
 
+/* Day bucket helpers for the library. Calls arrive from Drive all day, so
+   the list is grouped by the day they landed with the newest day first. */
+const startOfDay = (ts) => {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+const dayLabel = (ts) => {
+  if (!ts) return "No date";
+  const today = startOfDay(Date.now());
+  const day = startOfDay(ts);
+  const diffDays = Math.round((today - day) / 86400000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  try {
+    return new Date(ts).toLocaleDateString("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: day < today - 300 * 86400000 ? "numeric" : undefined,
+    });
+  } catch (e) {
+    return "Earlier";
+  }
+};
+
+const fmtTime = (ts) => {
+  if (!ts) return "";
+  try {
+    return new Date(ts).toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch (e) {
+    return "";
+  }
+};
+
+const SEEN_KEY = "fcd-last-seen-v1";
+
+function loadLastSeen() {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY);
+    if (raw) return Number(raw);
+    // First visit in this browser: start the clock now rather than flagging
+    // the entire back catalogue as new.
+    const now = Date.now();
+    localStorage.setItem(SEEN_KEY, String(now));
+    return now;
+  } catch (e) {
+    return Date.now();
+  }
+}
+
+function saveLastSeen(ts) {
+  try {
+    localStorage.setItem(SEEN_KEY, String(ts));
+  } catch (e) {
+    /* private window, the badge just will not persist */
+  }
+}
+
 function loadAuth() {
   try {
     const raw = localStorage.getItem(AUTH_KEY);
@@ -201,6 +264,17 @@ function Logo({ size = 30 }) {
 /* ------------------------------------------------------------------ */
 /* Presentational bits                                                 */
 /* ------------------------------------------------------------------ */
+
+function NewPill({ label = "NEW" }) {
+  return (
+    <span style={{
+      fontFamily: F.mono, fontSize: 10, fontWeight: 700, color: "#0D7A3E",
+      background: "#E6F7EE", border: "1px solid #A8DFC0",
+      borderRadius: 999, padding: "2px 7px", letterSpacing: "0.04em",
+      flexShrink: 0, whiteSpace: "nowrap",
+    }}>{label}</span>
+  );
+}
 
 function StatusChip({ status }) {
   const base = {
@@ -1633,6 +1707,9 @@ export default function App() {
   const [confirmingId, setConfirmingId] = useState(null);
   const [copied, setCopied] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
+  /* Everything uploaded after this moment is flagged NEW in the library.
+     Frozen for the whole session so the badges do not vanish mid-read. */
+  const [lastSeen, setLastSeen] = useState(loadLastSeen);
 
   const fileInputRef = useRef(null);
   const authRef = useRef(auth);
@@ -1918,6 +1995,17 @@ export default function App() {
           .some((s) => s.toLowerCase().includes(q))
       )
     : calls;
+
+  const newSinceLastVisit = calls.filter(
+    (c) => c.uploadedAt && c.uploadedAt > lastSeen
+  ).length;
+
+  const markLibrarySeen = () => {
+    const newest = calls.reduce((m, c) => Math.max(m, c.uploadedAt || 0), 0);
+    const ts = Math.max(newest, Date.now());
+    saveLastSeen(ts);
+    setLastSeen(ts);
+  };
 
   const selectedLight = calls.find((c) => c.id === selectedId) || null;
   const selectedFull = selectedId ? detailCache[selectedId] : null;
@@ -2439,6 +2527,25 @@ export default function App() {
               </div>
             )}
 
+            {newSinceLastVisit > 0 && (
+              <div className="rounded-xl flex items-center gap-3 mb-4"
+                style={{ background: "#F0FAF4", border: "1px solid #A8DFC0", padding: "12px 14px" }}>
+                <NewPill label={String(newSinceLastVisit)} />
+                <span style={{ fontSize: 13.5, color: C.ink, flex: 1, lineHeight: 1.5 }}>
+                  {newSinceLastVisit === 1
+                    ? "1 new call has landed since you were last here."
+                    : newSinceLastVisit + " new calls have landed since you were last here."}
+                </span>
+                <button
+                  className="fcd-btn"
+                  onClick={markLibrarySeen}
+                  style={{ ...btnGhost, flexShrink: 0, padding: "6px 11px", fontSize: 12.5 }}
+                >
+                  Mark as read
+                </button>
+              </div>
+            )}
+
             {/* list */}
             {!listLoaded ? (
               <div className="flex items-center gap-2" style={{ color: C.muted, fontSize: 13.5, padding: "18px 4px" }}>
@@ -2464,11 +2571,26 @@ export default function App() {
                     No calls match &ldquo;{query}&rdquo;.
                   </div>
                 )}
-                {visible.map((c) => {
+                {visible.map((c, vi) => {
                   const idx = calls.indexOf(c);
+                  const prev = vi > 0 ? visible[vi - 1] : null;
+                  const showDay =
+                    !prev || startOfDay(prev.uploadedAt || 0) !== startOfDay(c.uploadedAt || 0);
+                  const isNew = c.uploadedAt && c.uploadedAt > lastSeen;
                   return (
+                    <React.Fragment key={c.id}>
+                    {showDay && (
+                      <div className="flex items-center gap-2" style={{ marginTop: vi ? 10 : 0, padding: "0 4px" }}>
+                        <span style={{
+                          fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.12em",
+                          color: C.accent, fontWeight: 600, textTransform: "uppercase",
+                        }}>
+                          {dayLabel(c.uploadedAt)}
+                        </span>
+                        <span style={{ flex: 1, height: 1, background: C.line }} />
+                      </div>
+                    )}
                     <div
-                      key={c.id}
                       role="button"
                       tabIndex={0}
                       className="fcd-row rounded-xl flex items-center gap-3"
@@ -2512,6 +2634,13 @@ export default function App() {
                             : c.filename}
                         </div>
                       </div>
+                      <span style={{
+                        fontFamily: F.mono, fontSize: 11, color: C.faint,
+                        flexShrink: 0, whiteSpace: "nowrap",
+                      }}>
+                        {fmtTime(c.uploadedAt)}
+                      </span>
+                      {isNew && <NewPill />}
                       <StatusChip status={c.status} />
                       {c.dealStatus && <DealChip status={c.dealStatus} manual />}
                       {c.status === "error" && canEdit && (
@@ -2552,6 +2681,7 @@ export default function App() {
                         )
                       )}
                     </div>
+                    </React.Fragment>
                   );
                 })}
               </div>

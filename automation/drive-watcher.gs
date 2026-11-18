@@ -44,6 +44,13 @@ var EVERY_MINUTES = 1;
  *  brand new watcher from re-uploading months of old transcripts. */
 var FIRST_RUN_LOOKBACK_DAYS = 7;
 
+/** Who gets an email when new transcripts are picked up. Comma separated for
+ *  several people. Set to '' to turn the emails off. */
+var NOTIFY_EMAIL = 'sanskarsrivastava04@gmail.com';
+
+/** Link the notification email points at. */
+var APP_URL = 'https://finexercalldecode.netlify.app';
+
 /* --------------------------- main watcher --------------------------- */
 
 /** Apps Script kills a run at six minutes. Stop before that and save, so a
@@ -71,6 +78,7 @@ function checkForNewTranscripts() {
   var failed = 0;
   var sinceSave = 0;
   var ranOutOfTime = false;
+  var sentNames = [];
 
   function persist(markInitialised) {
     if (seen.length > 2000) seen = seen.slice(seen.length - 2000);
@@ -150,6 +158,7 @@ function checkForNewTranscripts() {
           skipped++;
         } else {
           Logger.log('Sent for decoding: ' + cleanName);
+          sentNames.push(cleanName.replace(/\.txt$/i, ''));
           sent++;
         }
       } else {
@@ -174,6 +183,37 @@ function checkForNewTranscripts() {
     'Done. sent=' + sent + ' skipped=' + skipped + ' failed=' + failed +
       (ranOutOfTime ? ' (time budget reached, continuing next run)' : '')
   );
+
+  if (sentNames.length) notify(sentNames);
+}
+
+/** Email whoever is on NOTIFY_EMAIL that new transcripts just went in.
+ *  Never lets a mail problem fail the run: the transcripts are already sent. */
+function notify(names) {
+  if (!NOTIFY_EMAIL) return;
+  try {
+    var subject =
+      names.length === 1
+        ? 'New call decoded: ' + names[0]
+        : names.length + ' new calls sent to the Call Decoder';
+
+    var list = '';
+    for (var i = 0; i < names.length; i++) list += '  - ' + names[i] + '\n';
+
+    var body =
+      (names.length === 1
+        ? 'A new transcript landed in the Demo Calls folder and is being decoded:\n\n'
+        : names.length + ' new transcripts landed in the Demo Calls folder and are being decoded:\n\n') +
+      list +
+      '\nThey appear at the top of the library, tagged NEW:\n' +
+      APP_URL +
+      '\n\nDecoding usually finishes within a couple of minutes.\n';
+
+    MailApp.sendEmail({ to: NOTIFY_EMAIL, subject: subject, body: body });
+    Logger.log('Notified ' + NOTIFY_EMAIL + ' about ' + names.length + ' new call(s).');
+  } catch (mailErr) {
+    Logger.log('Could not send the notification email: ' + mailErr);
+  }
 }
 
 /* ------------------------- setup and teardown ------------------------ */
