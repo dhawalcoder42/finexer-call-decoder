@@ -26,8 +26,41 @@
 
 /* ----------------------------- settings ----------------------------- */
 
-/** Drive folder that Otter writes transcripts into ("Demo Calls"). */
-var FOLDER_ID = '1l414Oo93KskyESUVji8WjxFL67nR3Rof';
+/** Folders to watch. Each entry is either { id: '...' } for a folder whose id
+ *  you know, or { name: '...' } to find it by name. The name form matters for
+ *  "Otter.ai Conversations": Otter only creates that folder the first time it
+ *  exports, so there is no id to paste yet. Looking it up by name means the
+ *  watcher starts picking those exports up on its own the moment it appears,
+ *  and quietly ignores it until then. */
+var FOLDERS = [
+  { id: '1l414Oo93KskyESUVji8WjxFL67nR3Rof', label: 'Demo Calls' },
+  { name: 'Otter.ai Conversations', label: 'Otter.ai Conversations' },
+];
+
+/** Resolve FOLDERS into live Drive folder objects, skipping any that do not
+ *  exist yet rather than failing the whole run. */
+function resolveFolders() {
+  var out = [];
+  for (var i = 0; i < FOLDERS.length; i++) {
+    var spec = FOLDERS[i];
+    try {
+      if (spec.id) {
+        out.push({ label: spec.label || spec.id, folder: DriveApp.getFolderById(spec.id) });
+      } else if (spec.name) {
+        var it = DriveApp.getFoldersByName(spec.name);
+        var found = false;
+        while (it.hasNext()) {
+          out.push({ label: spec.label || spec.name, folder: it.next() });
+          found = true;
+        }
+        if (!found) Logger.log('Folder "' + spec.name + '" does not exist yet, skipping.');
+      }
+    } catch (e) {
+      Logger.log('Could not open folder ' + (spec.label || spec.id || spec.name) + ': ' + e);
+    }
+  }
+  return out;
+}
 
 /** The Call Decoder ingest endpoint. */
 var INGEST_URL = 'https://finexercalldecode.netlify.app/.netlify/functions/ingest';
@@ -71,8 +104,9 @@ function checkForNewTranscripts() {
   var firstRun = props.getProperty('initialised') !== 'yes';
   var cutoff = new Date(Date.now() - FIRST_RUN_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
-  var folder = DriveApp.getFolderById(FOLDER_ID);
-  var files = folder.getFiles();
+  var sources = resolveFolders();
+  var sourceIndex = 0;
+  var files = sources.length ? sources[0].folder.getFiles() : null;
   var sent = 0;
   var skipped = 0;
   var failed = 0;
@@ -87,10 +121,17 @@ function checkForNewTranscripts() {
     sinceSave = 0;
   }
 
-  while (files.hasNext()) {
+  while (files) {
     if (Date.now() - started > TIME_BUDGET_MS) {
       ranOutOfTime = true;
       break;
+    }
+
+    // Walk each watched folder in turn, moving on when one is exhausted.
+    if (!files.hasNext()) {
+      sourceIndex++;
+      files = sourceIndex < sources.length ? sources[sourceIndex].folder.getFiles() : null;
+      continue;
     }
 
     var file = files.next();
@@ -257,8 +298,13 @@ function resetSeenFiles() {
 /** Quick health check: confirms the folder is reachable and the endpoint
  *  answers. Run this if something looks wrong. */
 function testConnection() {
-  var folder = DriveApp.getFolderById(FOLDER_ID);
-  Logger.log('Folder OK: ' + folder.getName());
+  var sources = resolveFolders();
+  if (!sources.length) {
+    Logger.log('No watched folder could be opened. Check the FOLDERS setting.');
+  }
+  for (var f = 0; f < sources.length; f++) {
+    Logger.log('Folder OK: ' + sources[f].folder.getName());
+  }
 
   var res = UrlFetchApp.fetch(INGEST_URL, {
     method: 'post',
