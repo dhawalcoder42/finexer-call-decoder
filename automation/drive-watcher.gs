@@ -77,9 +77,18 @@ var EVERY_MINUTES = 1;
  *  brand new watcher from re-uploading months of old transcripts. */
 var FIRST_RUN_LOOKBACK_DAYS = 7;
 
-/** Who gets an email when new transcripts are picked up. Comma separated for
- *  several people. Set to '' to turn the emails off. */
-var NOTIFY_EMAIL = 'sanskarsrivastava04@gmail.com';
+/** Who gets an email when new transcripts are picked up. One address per
+ *  line; MailApp takes them as one comma separated string, so the whole team
+ *  gets a single message rather than one each. Set to '' to turn the emails
+ *  off, and mind the Gmail cap of 100 recipients a day: seven people means
+ *  about fourteen notifications a day before Google starts refusing.
+ *
+ *  The live list is maintained in the Apps Script editor. Teammates' personal
+ *  addresses are deliberately not committed here. */
+var NOTIFY_EMAIL = [
+  'sanskarsrivastava04@gmail.com',
+  // plus the rest of the content team, set in the editor
+].join(',');
 
 /** Link the notification email points at. */
 var APP_URL = 'https://finexercalldecode.netlify.app';
